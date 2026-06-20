@@ -1,0 +1,30 @@
+meta {
+  name: 09 Baixar (cancelar) boleto emitido (imediatamente apos emissao)
+  type: http
+  seq: 9
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}/cancel?baas={{baas}}
+  auth: none
+}
+
+tests {
+  // Mesma regra de negocio do boleto/07: imediatamente apos a emissao, a
+  // CIP costuma ainda estar com a confirmacao pendente, e o C6
+  // corretamente bloqueia a baixa. O teste passa tanto se a baixa for
+  // aceita de primeira (204) quanto se for bloqueada com essa mensagem
+  // especifica. Ver boleto/11_baixar_boleto_apos_aguardar_cip para a
+  // verificacao de que a baixa realmente funciona depois que a CIP libera.
+  test("baixa aceita ou bloqueada pela CIP pendente (ambos esperados)", function() {
+    const status = res.getStatus();
+    const body = res.getBody();
+    const isSuccess = status === 204;
+    const isCipPending =
+      status === 502 &&
+      body &&
+      typeof body.error === "string" &&
+      body.error.includes("CIP sujeita"); // ASCII-only substring, avoids accent-encoding mismatches
+    expect(isSuccess || isCipPending).to.be.true;
+  });
+}

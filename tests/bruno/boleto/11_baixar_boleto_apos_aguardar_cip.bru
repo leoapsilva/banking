@@ -1,0 +1,26 @@
+meta {
+  name: 11 Baixar boleto apos aguardar confirmacao da CIP
+  type: http
+  seq: 11
+}
+
+script:pre-request {
+  // Mesma logica de boleto/10: espera independente (este arquivo pode ser
+  // rodado isoladamente) para garantir que a CIP ja confirmou o registro
+  // do boleto antes de tentarmos a baixa. Ver boleto/09 para o caso em
+  // que a baixa e tentada imediatamente apos a emissao.
+  const waitMs = Number(bru.getVar('cip_settle_wait_ms')) || 90000;
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    // busy-wait intencional
+  }
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}/cancel?baas={{baas}}
+  auth: none
+}
+
+assert {
+  res.status: eq 204
+}

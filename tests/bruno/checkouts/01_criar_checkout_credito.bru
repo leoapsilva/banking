@@ -1,0 +1,55 @@
+meta {
+  name: 01 Criar checkout credito (caso feliz)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/v1/checkouts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "external_reference_id": "BRUNO0001",
+    "amount_cents": 12345,
+    "currency": "BRL",
+    "description": "Checkout de teste via Bruno",
+    "payer": {
+      "name": "Jose da Silva",
+      "tax_id": "12345678909",
+      "email": "pagador@email.com.br",
+      "phone_number": "11999999999",
+      "address": {
+        "street": "Av. Nove de Julho",
+        "number": "123",
+        "city": "Rio de Janeiro",
+        "state": "RJ",
+        "zip_code": "05093000"
+      }
+    },
+    "card": {
+      "type": "CREDIT",
+      "installments": 1,
+      "recurrent": false,
+      "save_card": false,
+      "capture": true,
+      "authenticate": "NOT_REQUIRED"
+    },
+    "redirect_url": "http://www.seusite.com.br/finalizaPedido"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+  res.body.url: isDefined
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("checkout_id", res.body.id);
+  }
+}

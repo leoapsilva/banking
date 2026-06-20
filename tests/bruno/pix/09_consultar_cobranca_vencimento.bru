@@ -1,0 +1,16 @@
+meta {
+  name: 09 Consultar cobranca com vencimento pelo txid
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/v1/pix/charges/{{pix_txid_due_date}}?baas={{baas}}&kind=with_due_date
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.txid: eq {{pix_txid_due_date}}
+  res.body.kind: eq WITH_DUE_DATE
+}

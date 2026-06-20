@@ -1,0 +1,33 @@
+meta {
+  name: 03 Reenviar mesma notificacao (idempotencia)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/webhooks/c6/{{webhook_path_secret}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "external_id": "BRUNO-WEBHOOK-0001",
+    "date_time": "2026-06-19T12:00:00.000000000Z",
+    "client_id": "913dc8cd-2d75-46ea-abed-51f0dad85c6d",
+    "partner_id": "00010",
+    "service": "CHECKOUT",
+    "status": "PAID",
+    "information": "{\"id\":\"{{checkout_id}}\",\"status\":\"PAID\",\"payment\":{\"card\":{\"card_info\":{\"token\":\"bruno-test-token-0001\"}}}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+}
+
+script:post-response {
+  // Reenviar o mesmo external_id+status+date_time deve ser absorvido pela
+  // constraint UNIQUE de webhook_events sem erro (ver internal/webhook/repository),
+  // ou seja: nenhum efeito colateral duplicado, apenas 200 novamente.
+}

@@ -1,0 +1,28 @@
+meta {
+  name: 02 Criar checkout sem baas (deve falhar)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/v1/checkouts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "amount_cents": 12345,
+    "currency": "BRL",
+    "card": {
+      "type": "CREDIT",
+      "installments": 1,
+      "authenticate": "NOT_REQUIRED"
+    }
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: isDefined
+}

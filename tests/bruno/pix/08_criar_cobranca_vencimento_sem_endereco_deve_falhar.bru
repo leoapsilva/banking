@@ -1,0 +1,32 @@
+meta {
+  name: 08 Criar cobranca com vencimento sem endereco do devedor (deve falhar)
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/v1/pix/charges
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "txid": "BRUNOTXIDNOADDRESS000000000002",
+    "amount_cents": 25000,
+    "pix_key": "{{pix_key}}",
+    "due_date": "2026-12-31",
+    "days_valid_after_due_date": 30,
+    "debtor": {
+      "document_type": "CPF",
+      "document_id": "12345678909",
+      "name": "Jose da Silva"
+    }
+  }
+}
+
+assert {
+  res.status: eq 502
+  res.body.error: contains address
+}

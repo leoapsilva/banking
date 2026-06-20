@@ -1,0 +1,32 @@
+meta {
+  name: 02 Criar cobranca imediata identificando CPF e nome do devedor
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/v1/pix/charges
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "amount_cents": 15000,
+    "pix_key": "{{pix_key}}",
+    "expiration_seconds": 3600,
+    "debtor": {
+      "document_type": "CPF",
+      "document_id": "12345678909",
+      "name": "Jose da Silva"
+    },
+    "payer_request": "Cobranca de teste via Bruno com devedor"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.txid: isDefined
+  res.body.kind: eq IMMEDIATE
+}

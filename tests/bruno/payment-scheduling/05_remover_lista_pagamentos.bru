@@ -1,0 +1,22 @@
+meta {
+  name: 05 Remover uma lista de pagamentos de um grupo de pagamentos
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{base_url}}/v1/payment-scheduling/groups/{{payment_group_id}}/items
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "item_ids": ["{{payment_item_b}}"]
+  }
+}
+
+assert {
+  res.status: eq 204
+}

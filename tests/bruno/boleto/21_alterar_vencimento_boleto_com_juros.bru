@@ -1,0 +1,43 @@
+meta {
+  name: 21 Alterar data de vencimento de boleto com juros/multa (roteiro 5.a, apos aguardar CIP)
+  type: http
+  seq: 21
+}
+
+docs {
+  Distincao em relacao ao boleto/10 (que tambem altera due_date, mas num
+  boleto SEM interest/fine, emitido em boleto/01 -- ou seja, no sentido do
+  roteiro, boleto/10 testa mais precisamente o item 5.b "data de validade").
+  Este teste altera due_date especificamente em um boleto QUE TEM
+  interest/fine configurados (emitido em boleto/20), cobrindo o item 5.a
+  "data de vencimento" no sentido em que o vencimento efetivamente dispara
+  o calculo de juros/multa. O C6 nao documenta um campo distinto para
+  "vencimento" vs "validade" -- ambos sao o mesmo campo due_date; esta e a
+  nossa melhor interpretacao da distincao pretendida pelo roteiro.
+}
+
+script:pre-request {
+  const waitMs = Number(bru.getVar('cip_settle_wait_ms')) || 90000;
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    // busy-wait intencional
+  }
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id_20}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "due_date": "2027-02-01"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.due_date: eq 2027-02-01
+}

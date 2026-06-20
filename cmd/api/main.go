@@ -1,0 +1,166 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	boletohandler "github.com/upwifi/banking/internal/boleto/handler"
+	boletorepo "github.com/upwifi/banking/internal/boleto/repository"
+	boletoservice "github.com/upwifi/banking/internal/boleto/service"
+	checkouthandler "github.com/upwifi/banking/internal/checkout/handler"
+	checkoutrepo "github.com/upwifi/banking/internal/checkout/repository"
+	checkoutservice "github.com/upwifi/banking/internal/checkout/service"
+	paymentschedulinghandler "github.com/upwifi/banking/internal/paymentscheduling/handler"
+	paymentschedulingrepo "github.com/upwifi/banking/internal/paymentscheduling/repository"
+	paymentschedulingservice "github.com/upwifi/banking/internal/paymentscheduling/service"
+	pixhandler "github.com/upwifi/banking/internal/pix/handler"
+	pixrepo "github.com/upwifi/banking/internal/pix/repository"
+	pixservice "github.com/upwifi/banking/internal/pix/service"
+	"github.com/upwifi/banking/internal/platform/config"
+	"github.com/upwifi/banking/internal/platform/cronworker"
+	"github.com/upwifi/banking/internal/platform/httpserver"
+	"github.com/upwifi/banking/internal/platform/logging"
+	"github.com/upwifi/banking/internal/platform/postgres"
+	"github.com/upwifi/banking/internal/platform/providerregistry"
+	c6provider "github.com/upwifi/banking/internal/provider/c6"
+	c6auth "github.com/upwifi/banking/internal/provider/c6/auth"
+	c6client "github.com/upwifi/banking/internal/provider/c6/client"
+	subscriptionhandler "github.com/upwifi/banking/internal/subscription/handler"
+	subscriptionrepo "github.com/upwifi/banking/internal/subscription/repository"
+	subscriptionservice "github.com/upwifi/banking/internal/subscription/service"
+	webhookhandler "github.com/upwifi/banking/internal/webhook/handler"
+	webhookrepo "github.com/upwifi/banking/internal/webhook/repository"
+	webhookservice "github.com/upwifi/banking/internal/webhook/service"
+)
+
+func main() {
+	if err := run(); err != nil {
+		slog.Error("fatal", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	logging.Setup(cfg.LogLevel)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := postgres.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	if err := postgres.RunMigrations(ctx, pool); err != nil {
+		return err
+	}
+
+	// --- C6 provider wiring ---
+	mtlsHTTPClient, err := c6auth.NewTLSHTTPClient(cfg.C6MTLSCertPath, cfg.C6MTLSKeyPath)
+	if err != nil {
+		return err
+	}
+	tokenManager := c6auth.New(mtlsHTTPClient, cfg.C6BaseURL(), cfg.C6ClientID, cfg.C6ClientSecret)
+
+	c6CheckoutClient := c6client.New(mtlsHTTPClient, tokenManager, cfg.C6BaseURL()+"/v1/checkouts", cfg.C6PartnerName, cfg.C6PartnerVersion)
+	c6WebhookClient := c6client.New(mtlsHTTPClient, tokenManager, cfg.C6BaseURL()+"/v1/webhooks", cfg.C6PartnerName, cfg.C6PartnerVersion)
+	c6BankSlipClient := c6client.New(mtlsHTTPClient, tokenManager, cfg.C6BaseURL()+"/v1/bank_slips", cfg.C6PartnerName, cfg.C6PartnerVersion)
+	c6PixClient := c6client.New(mtlsHTTPClient, tokenManager, cfg.C6BaseURL()+"/v2/pix", cfg.C6PartnerName, cfg.C6PartnerVersion)
+	c6SchedulePaymentsClient := c6client.New(mtlsHTTPClient, tokenManager, cfg.C6BaseURL()+"/v1/schedule_payments", cfg.C6PartnerName, cfg.C6PartnerVersion)
+
+	c6CheckoutAdapter := c6provider.NewCheckoutAdapter(c6CheckoutClient)
+	c6WebhookAdapter := c6provider.NewWebhookAdapter(c6WebhookClient)
+	c6BoletoAdapter := c6provider.NewBoletoAdapter(c6BankSlipClient)
+	c6PixAdapter := c6provider.NewPixAdapter(c6PixClient)
+	c6PaymentSchedulingAdapter := c6provider.NewPaymentSchedulingAdapter(c6SchedulePaymentsClient)
+
+	registry := providerregistry.New()
+	providerregistry.Register(registry, "checkout", "c6", c6CheckoutAdapter)
+	providerregistry.Register(registry, "webhook", "c6", c6WebhookAdapter)
+	providerregistry.Register(registry, "boleto", "c6", c6BoletoAdapter)
+	providerregistry.Register(registry, "pix", "c6", c6PixAdapter)
+	providerregistry.Register(registry, "paymentscheduling", "c6", c6PaymentSchedulingAdapter)
+
+	// --- Feature wiring ---
+	checkoutRepository := checkoutrepo.New(pool)
+	checkoutSvc := checkoutservice.New(registry, checkoutRepository)
+	checkoutHandler := checkouthandler.New(checkoutSvc)
+
+	webhookRepository := webhookrepo.New(pool)
+	webhookSvc := webhookservice.New(registry, webhookRepository, webhookservice.ExpectedOrigin{
+		ClientID:  cfg.C6ExpectedClientID,
+		PartnerID: cfg.C6ExpectedPartnerID,
+	})
+	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.WebhookPathSecret)
+
+	subscriptionRepository := subscriptionrepo.New(pool)
+	subscriptionSvc := subscriptionservice.New(subscriptionRepository, checkoutRepository, checkoutSvc)
+	subscriptionHandlerInst := subscriptionhandler.New(subscriptionSvc)
+
+	webhookSvc.SetCheckoutSink(subscriptionSvc)
+
+	boletoRepository := boletorepo.New(pool)
+	boletoSvc := boletoservice.New(registry, boletoRepository)
+	boletoHandlerInst := boletohandler.New(boletoSvc)
+
+	pixRepository := pixrepo.New(pool)
+	pixSvc := pixservice.New(registry, pixRepository)
+	pixHandlerInst := pixhandler.New(pixSvc)
+
+	paymentSchedulingRepository := paymentschedulingrepo.New(pool)
+	paymentSchedulingSvc := paymentschedulingservice.New(registry, paymentSchedulingRepository)
+	paymentSchedulingHandlerInst := paymentschedulinghandler.New(paymentSchedulingSvc)
+
+	// --- HTTP server ---
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	checkoutHandler.Register(mux)
+	webhookHandlerInst.Register(mux)
+	subscriptionHandlerInst.Register(mux)
+	boletoHandlerInst.Register(mux)
+	pixHandlerInst.Register(mux)
+	paymentSchedulingHandlerInst.Register(mux)
+
+	server := &http.Server{
+		Addr:    cfg.HTTPAddr,
+		Handler: httpserver.RequestLogger(cfg.LogHTTPBody)(mux),
+	}
+
+	// --- Cron worker: recurring monthly billing cycles ---
+	worker := cronworker.New()
+	if err := worker.Schedule("charge-due-subscriptions", cfg.CronChargeInterval, subscriptionSvc.ChargeDueSubscriptions); err != nil {
+		return err
+	}
+	worker.Start()
+	defer worker.Stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("http server listening", "addr", cfg.HTTPAddr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		slog.Info("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		return err
+	}
+}

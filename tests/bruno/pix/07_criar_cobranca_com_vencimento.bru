@@ -1,0 +1,44 @@
+meta {
+  name: 07 Criar cobranca com vencimento (dataDeVencimento + validade)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/v1/pix/charges
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "txid": "BRUNOTXIDDUEDATE0000000000001",
+    "amount_cents": 25000,
+    "pix_key": "{{pix_key}}",
+    "due_date": "2026-12-31",
+    "days_valid_after_due_date": 30,
+    "debtor": {
+      "document_type": "CPF",
+      "document_id": "12345678909",
+      "name": "Jose da Silva",
+      "street": "Av. Nove de Julho",
+      "city": "Rio de Janeiro",
+      "state": "RJ",
+      "zip_code": "05093000"
+    },
+    "payer_request": "Cobranca com vencimento via Bruno"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.txid: eq BRUNOTXIDDUEDATE0000000000001
+  res.body.kind: eq WITH_DUE_DATE
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("pix_txid_due_date", res.body.txid);
+  }
+}

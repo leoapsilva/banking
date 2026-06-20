@@ -1,0 +1,37 @@
+meta {
+  name: 04 Criar parcelamento anual 12x com juros do cliente
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/v1/subscriptions/annual-installment
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "customer_name": "Jose da Silva",
+    "customer_tax_id": "12345678909",
+    "customer_email": "pagador@email.com.br",
+    "amount_cents": 120000,
+    "currency": "BRL",
+    "installments": 12,
+    "redirect_url": "http://www.seusite.com.br/finalizaPedido"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.subscription_id: isDefined
+  res.body.checkout_id: isDefined
+  res.body.checkout_url: isDefined
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("annual_subscription_id", res.body.subscription_id);
+  }
+}

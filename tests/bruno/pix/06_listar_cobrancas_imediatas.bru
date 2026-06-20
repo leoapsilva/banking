@@ -1,0 +1,15 @@
+meta {
+  name: 06 Consultar lista de cobrancas imediatas por periodo
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/v1/pix/charges?baas={{baas}}&start=2026-01-01T00:00:00Z&end=2026-12-31T23:59:59Z
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.charges: isDefined
+}

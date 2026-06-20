@@ -1,0 +1,7 @@
+.git
+.gitignore
+docs/c6/auth/
+*.md
+docker/.env
+.env
+.env.*

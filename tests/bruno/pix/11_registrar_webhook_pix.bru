@@ -1,0 +1,23 @@
+meta {
+  name: 11 Configurar webhook do PIX para a chave (item 7.8)
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{base_url}}/v1/pix/webhook
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "pix_key": "{{pix_key}}",
+    "url": "{{webhook_public_url}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+}

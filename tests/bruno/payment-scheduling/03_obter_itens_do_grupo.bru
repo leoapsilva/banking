@@ -1,0 +1,27 @@
+meta {
+  name: 03 Obter todos os itens de um grupo de pagamentos
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/v1/payment-scheduling/groups/{{payment_group_id}}/items?baas={{baas}}
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.items: isDefined
+}
+
+script:post-response {
+  if (res.status === 200 && Array.isArray(res.body.items)) {
+    const byAmount = (cents) => res.body.items.find((i) => i.amount_cents === cents);
+    const itemA = byAmount(1000);
+    const itemB = byAmount(2000);
+    const itemC = byAmount(3000);
+    if (itemA) bru.setEnvVar("payment_item_a", itemA.id);
+    if (itemB) bru.setEnvVar("payment_item_b", itemB.id);
+    if (itemC) bru.setEnvVar("payment_item_c", itemC.id);
+  }
+}

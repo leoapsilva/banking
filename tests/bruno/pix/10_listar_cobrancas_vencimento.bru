@@ -1,0 +1,15 @@
+meta {
+  name: 10 Consultar lista de cobrancas com vencimento por periodo
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{base_url}}/v1/pix/charges?baas={{baas}}&kind=with_due_date&start=2026-01-01T00:00:00Z&end=2026-12-31T23:59:59Z
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.charges: isDefined
+}

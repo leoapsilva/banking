@@ -1,0 +1,35 @@
+meta {
+  name: 05 Emitir boleto com tiers de desconto fora de ordem (deve falhar)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/v1/bank-slips
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "external_reference_id": "BRUNOBOL05",
+    "amount_cents": 10000,
+    "due_date": "2026-12-31",
+    "discount": {
+      "tiers": [
+        { "type": "PERCENTAGE", "value": 5, "deadline_days": 5 },
+        { "type": "PERCENTAGE", "value": 10, "deadline_days": 10 }
+      ]
+    },
+    "payer": {
+      "name": "Jose da Silva",
+      "tax_id": "12345678909"
+    }
+  }
+}
+
+assert {
+  res.status: eq 502
+  res.body.error: contains decreasing
+}

@@ -1,0 +1,24 @@
+meta {
+  name: 04 Criar cobranca imediata sem pix_key (deve falhar)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/v1/pix/charges
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "amount_cents": 10000,
+    "expiration_seconds": 3600
+  }
+}
+
+assert {
+  res.status: eq 502
+  res.body.error: contains pix_key
+}

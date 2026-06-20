@@ -1,0 +1,22 @@
+meta {
+  name: 08 Alterar boleto sem nenhum campo informado (deve falhar)
+  type: http
+  seq: 8
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}"
+  }
+}
+
+assert {
+  res.status: eq 502
+  res.body.error: contains at least one field
+}

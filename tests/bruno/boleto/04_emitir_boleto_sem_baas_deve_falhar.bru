@@ -1,0 +1,28 @@
+meta {
+  name: 04 Emitir boleto sem baas (deve falhar)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/v1/bank-slips
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "external_reference_id": "BRUNOBOL04",
+    "amount_cents": 10000,
+    "due_date": "2026-12-31",
+    "payer": {
+      "name": "Jose da Silva",
+      "tax_id": "12345678909"
+    }
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: isDefined
+}

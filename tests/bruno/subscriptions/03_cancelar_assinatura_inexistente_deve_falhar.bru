@@ -1,0 +1,22 @@
+meta {
+  name: 03 Cancelar assinatura com id invalido (deve falhar)
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{base_url}}/v1/subscriptions/nao-e-um-uuid/cancel
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "reason": "Teste de id invalido"
+  }
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: isDefined
+}

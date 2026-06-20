@@ -1,0 +1,22 @@
+meta {
+  name: 07 Enviar grupo de pagamentos para aprovacao
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/v1/payment-scheduling/groups/{{payment_group_id}}/submit
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "uploader_name": "Bruno Teste"
+  }
+}
+
+assert {
+  res.status: eq 204
+}

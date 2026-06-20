@@ -1,0 +1,13 @@
+vars {
+  base_url: http://localhost:8082
+  baas: c6
+  webhook_path_secret: {{C6_WEBHOOK_PATH_SECRET}}
+  webhook_public_url: https://example.com/webhooks/c6-placeholder
+  pix_key: {{C6_SANDBOX_PIX_KEY}}
+  cip_settle_wait_ms: 90000
+}
+
+vars:secret [
+  C6_WEBHOOK_PATH_SECRET,
+  C6_SANDBOX_PIX_KEY
+]

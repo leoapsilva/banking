@@ -1,0 +1,14 @@
+meta {
+  name: 04 Remover um pagamento do grupo de pagamentos
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{base_url}}/v1/payment-scheduling/groups/{{payment_group_id}}/items/{{payment_item_a}}?baas={{baas}}
+  auth: none
+}
+
+assert {
+  res.status: eq 204
+}

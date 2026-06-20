@@ -1,0 +1,14 @@
+meta {
+  name: 05 Cancelar checkout criado
+  type: http
+  seq: 5
+}
+
+put {
+  url: {{base_url}}/v1/checkouts/{{checkout_id}}/cancel?baas={{baas}}
+  auth: none
+}
+
+assert {
+  res.status: eq 204
+}

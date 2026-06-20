@@ -1,0 +1,33 @@
+meta {
+  name: 02 Enviar grupo de pagamentos para consulta inicial (decode)
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/v1/payment-scheduling/groups
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "items": [
+      { "content": "{{pix_key}}", "amount_cents": 1000, "description": "Item A - sera removido individualmente" },
+      { "content": "{{pix_key}}", "amount_cents": 2000, "description": "Item B - sera removido em lote" },
+      { "content": "{{pix_key}}", "amount_cents": 3000, "description": "Item C - sera mantido e submetido para aprovacao" }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.group_id: isDefined
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("payment_group_id", res.body.group_id);
+  }
+}

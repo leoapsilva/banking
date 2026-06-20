@@ -1,0 +1,43 @@
+meta {
+  name: 07 Alterar data de vencimento do boleto (imediatamente apos emissao)
+  type: http
+  seq: 7
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "due_date": "2027-01-15"
+  }
+}
+
+tests {
+  // Imediatamente apos a emissao (boleto/01), o registro inicial na CIP
+  // ainda costuma estar pendente de confirmacao. Nesse caso o C6
+  // corretamente bloqueia a alteracao com
+  // "Evento nao pode ser realizado, pois ja existe uma requisicao a CIP
+  // sujeita a aprovacao" (400, repassado por nos como 502). Isso e uma
+  // regra de negocio esperada do C6, nao uma falha da aplicacao -- por
+  // isso o teste passa tanto se a alteracao for aceita de primeira (200,
+  // caso a CIP ja tenha confirmado a tempo) quanto se for bloqueada com
+  // essa mensagem especifica. Ver boleto/10_alterar_boleto_apos_aguardar_cip
+  // para a verificacao de que a alteracao realmente funciona depois que a
+  // CIP libera.
+  test("alteracao aceita ou bloqueada pela CIP pendente (ambos esperados)", function() {
+    const status = res.getStatus();
+    const body = res.getBody();
+    const isSuccess = status === 200;
+    const isCipPending =
+      status === 502 &&
+      body &&
+      typeof body.error === "string" &&
+      body.error.includes("CIP sujeita"); // ASCII-only substring, avoids accent-encoding mismatches
+    expect(isSuccess || isCipPending).to.be.true;
+  });
+}

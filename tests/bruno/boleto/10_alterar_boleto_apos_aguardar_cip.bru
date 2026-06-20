@@ -1,0 +1,38 @@
+meta {
+  name: 10 Alterar boleto apos aguardar confirmacao da CIP
+  type: http
+  seq: 10
+}
+
+script:pre-request {
+  // O registro inicial do boleto (boleto/01) na CIP leva um tempo para
+  // ser confirmado; antes disso o C6 bloqueia alteracao/baixa (ver
+  // boleto/07 e boleto/09). O sandbox de script do Bruno nao tem um
+  // helper nativo de delay/sleep, entao a espera e feita com um
+  // busy-wait sincrono. Ajuste cip_settle_wait_ms no ambiente
+  // (tests/bruno/environments/*.bru) se o tempo real de confirmacao da
+  // CIP for diferente do default (90s).
+  const waitMs = Number(bru.getVar('cip_settle_wait_ms')) || 90000;
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    // busy-wait intencional
+  }
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "due_date": "2027-01-15"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.due_date: eq 2027-01-15
+}

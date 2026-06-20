@@ -1,0 +1,61 @@
+name: banking
+
+services:
+  postgres:
+    build:
+      context: ./postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-banking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-banking}
+      POSTGRES_DB: ${POSTGRES_DB:-banking}
+    ports:
+      - "${POSTGRES_PORT:-7532}:5432"
+    volumes:
+      - banking-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-banking} -d ${POSTGRES_DB:-banking}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  banking:
+    build:
+      context: ..
+      dockerfile: docker/banking/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # All C6_* secrets and runtime settings (client id/secret, partner
+    # headers, webhook path secret, cron interval, etc.) come from the
+    # single root .env — the same file used for `go run ./cmd/api` without
+    # Docker. Only the two values below genuinely differ between the two
+    # ways of running, so they're overridden here: DATABASE_URL must point
+    # at the "postgres" service hostname (not localhost), and the mTLS
+    # cert/key paths must point at the in-container bind mount destination
+    # (not the host filesystem path used outside Docker).
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-banking}:${POSTGRES_PASSWORD:-banking}@postgres:5432/${POSTGRES_DB:-banking}?sslmode=disable
+      C6_MTLS_CERT_PATH: /certs/c6.crt
+      C6_MTLS_KEY_PATH: /certs/c6.key
+      HTTP_ADDR: ":8082"
+    ports:
+      - "${HTTP_PORT:-8082}:8082"
+    volumes:
+      # C6 sandbox mTLS credentials. These live outside version control
+      # (see ../.gitignore) and must exist locally before `docker compose up`.
+      # Set C6_CERT_FILE/C6_KEY_FILE in docker/.env (copy from .env.example)
+      # to the .crt/.key paths under docs/c6/auth/.
+      - "${C6_CERT_FILE}:/certs/c6.crt:ro"
+      - "${C6_KEY_FILE}:/certs/c6.key:ro"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  banking-postgres-data:

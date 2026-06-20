@@ -1,0 +1,59 @@
+meta {
+  name: 17 Aplicar alteracao de valor, multa e juros (roteiro 5.c, apos aguardar CIP)
+  type: http
+  seq: 17
+}
+
+script:pre-request {
+  // O boleto usado aqui foi emitido em boleto/16. Assim como em
+  // boleto/10 e boleto/11, esperamos a CIP confirmar o registro inicial
+  // antes de tentar a alteracao, para garantir um resultado
+  // deterministico (200) em vez de depender do bloco tests{} tolerante.
+  const waitMs = Number(bru.getVar('cip_settle_wait_ms')) || 90000;
+  const start = Date.now();
+  while (Date.now() - start < waitMs) {
+    // busy-wait intencional
+  }
+}
+
+put {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id_16}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "amount_cents": 37500,
+    "fine": {
+      "type": "PERCENTAGE",
+      "value": 3,
+      "deadline_days": 0
+    },
+    "interest": {
+      "type": "PERCENTAGE",
+      "value": 2,
+      "deadline_days": 0
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.amount_cents: eq 37500
+}
+
+tests {
+  // Validamos amount_cents diretamente porque a API o ecoa de volta no
+  // corpo da resposta. fine/interest, por outro lado, nao sao ecoados
+  // pelo PUT de atualizacao nesta API (bankSlipDetailsResponse so e
+  // usado no GET, e no sandbox C6 mesmo o GET deste boleto nao trouxe
+  // fine/interest de volta -- comportamento observado e nao um bug
+  // introduzido por este teste). Por isso aqui so confirmamos que a
+  // requisicao de alteracao foi aceita (200) sem assumir um shape de
+  // resposta que a API nao garante.
+  test("alteracao de valor, multa e juros aceita com sucesso", function() {
+    expect(res.getStatus()).to.equal(200);
+  });
+}

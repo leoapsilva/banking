@@ -1,0 +1,47 @@
+meta {
+  name: 12 Emitir boleto com apenas juros diarios, sem multa (roteiro 2.a)
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{base_url}}/v1/bank-slips
+  body: json
+  auth: none
+}
+
+script:pre-request {
+  bru.setVar("ext_ref", "D" + Date.now().toString(36).toUpperCase().slice(-9));
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "external_reference_id": "{{ext_ref}}",
+    "amount_cents": 40000,
+    "currency": "BRL",
+    "due_date": "2026-12-31",
+    "interest": {
+      "type": "PERCENTAGE",
+      "value": 1,
+      "deadline_days": 0
+    },
+    "payer": {
+      "name": "Jose da Silva",
+      "tax_id": "12345678909",
+      "email": "pagador@email.com.br",
+      "address": {
+        "street": "Av. Nove de Julho",
+        "number": "123",
+        "city": "Rio de Janeiro",
+        "state": "RJ",
+        "zip_code": "05093000"
+      }
+    }
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+}

@@ -1,0 +1,16 @@
+meta {
+  name: 06 Consultar boleto emitido
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}?baas={{baas}}
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: eq {{bank_slip_id}}
+  res.body.status: isDefined
+}

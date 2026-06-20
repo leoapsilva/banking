@@ -1,0 +1,30 @@
+meta {
+  name: 03 Criar checkout parcelado sem interest_type (deve falhar)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/v1/checkouts
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "external_reference_id": "BRUNO0003",
+    "amount_cents": 100000,
+    "currency": "BRL",
+    "card": {
+      "type": "CREDIT",
+      "installments": 12,
+      "authenticate": "NOT_REQUIRED"
+    }
+  }
+}
+
+assert {
+  res.status: eq 502
+  res.body.error: contains interest_type
+}

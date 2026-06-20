@@ -1,0 +1,81 @@
+meta {
+  name: 18 Baixar boleto vencido (roteiro 4.b - aproximacao, ver comentario)
+  type: http
+  seq: 18
+}
+
+docs {
+  LIMITACAO CONHECIDA / APROXIMACAO (documentar no roteiro antes de enviar
+  ao C6): o item 4.b do roteiro pede a baixa de um boleto "que ja venceu".
+  internal/boleto/service/service.go rejeita due_date no passado na
+  criacao ("due_date must not be in the past"), e nao ha como manipular o
+  relogio do sandbox do C6 para forcar um boleto emitido por nos a vencer
+  de fato. Portanto NAO e possivel, nas condicoes atuais, criar via nossa
+  API um boleto que esteja genuinamente vencido (passado) no momento da
+  baixa.
+
+  Este teste usa a aproximacao mais proxima permitida pela validacao:
+  emite um boleto com due_date = data de hoje (o limite minimo aceito,
+  pois ontem seria rejeitado) e, apos aguardar a confirmacao da CIP,
+  tenta a baixa no mesmo dia do vencimento. Isso NAO comprova o
+  comportamento do C6 para um boleto vencido ha dias/semanas (ex.: boleto
+  que passou por protesto, negativacao, ou mudanca de status interna do
+  banco apos o vencimento) -- so testa a baixa no dia exato do
+  vencimento, que e o caso mais proximo de "vencido" que conseguimos
+  automatizar de forma honesta.
+
+  Para validar de fato o cenario do roteiro 4.b antes de submeter a
+  homologacao ao C6, recomenda-se um teste manual: emitir um boleto com
+  due_date = hoje + poucos dias, aguardar a data passar naturalmente, e
+  so entao chamar PUT /v1/bank-slips/{id}/cancel?baas={{baas}} contra
+  esse boleto especifico.
+}
+
+script:pre-request {
+  bru.setVar("ext_ref", "I" + Date.now().toString(36).toUpperCase().slice(-9));
+
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, "0");
+  const dd = String(today.getDate()).padStart(2, "0");
+  bru.setVar("due_date_today", `${yyyy}-${mm}-${dd}`);
+}
+
+post {
+  url: {{base_url}}/v1/bank-slips
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "external_reference_id": "{{ext_ref}}",
+    "amount_cents": 15000,
+    "currency": "BRL",
+    "due_date": "{{due_date_today}}",
+    "payer": {
+      "name": "Jose da Silva",
+      "tax_id": "12345678909",
+      "email": "pagador@email.com.br",
+      "address": {
+        "street": "Av. Nove de Julho",
+        "number": "123",
+        "city": "Rio de Janeiro",
+        "state": "RJ",
+        "zip_code": "05093000"
+      }
+    }
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.id: isDefined
+}
+
+script:post-response {
+  if (res.status === 201) {
+    bru.setEnvVar("bank_slip_id_18", res.body.id);
+  }
+}

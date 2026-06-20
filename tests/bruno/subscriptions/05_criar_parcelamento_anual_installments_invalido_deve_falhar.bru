@@ -1,0 +1,28 @@
+meta {
+  name: 05 Criar parcelamento anual com installments invalido (deve falhar)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/v1/subscriptions/annual-installment
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "customer_name": "Jose da Silva",
+    "customer_tax_id": "12345678909",
+    "customer_email": "pagador@email.com.br",
+    "amount_cents": 120000,
+    "currency": "BRL",
+    "installments": 1
+  }
+}
+
+assert {
+  res.status: eq 502
+  res.body.error: contains installments
+}
