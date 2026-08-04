@@ -26,6 +26,7 @@ type Service struct {
 	expected ExpectedOrigin
 
 	checkoutSink webhookfeature.CheckoutEventSink
+	bankSlipSink webhookfeature.BankSlipEventSink
 }
 
 func New(registry *providerregistry.Registry, repo *repository.Repository, expected ExpectedOrigin) *Service {
@@ -36,6 +37,12 @@ func New(registry *providerregistry.Registry, repo *repository.Repository, expec
 // inbound events. Call once during wiring in main.go.
 func (s *Service) SetCheckoutSink(sink webhookfeature.CheckoutEventSink) {
 	s.checkoutSink = sink
+}
+
+// SetBankSlipSink registers the handler invoked for BANK_SLIP /
+// BANK_SLIP_PIX inbound events. Call once during wiring in main.go.
+func (s *Service) SetBankSlipSink(sink webhookfeature.BankSlipEventSink) {
+	s.bankSlipSink = sink
 }
 
 func (s *Service) resolveRegistrar(baas string) (webhookfeature.RegistrarProvider, error) {
@@ -102,9 +109,11 @@ func (s *Service) ProcessInbound(ctx context.Context, baas string, rawBody []byt
 			dispatchErr = s.checkoutSink.HandleCheckoutEvent(ctx, event)
 		}
 	case domain.ServiceBankSlip, domain.ServiceBankSlipPix:
-		// Fase 2: boleto/bolepix handling not implemented yet; event is
-		// already persisted for later reprocessing.
-		slog.Info("webhook: boleto/bolepix event stored, processing deferred to fase 2", "external_id", event.ExternalID)
+		if s.bankSlipSink != nil {
+			dispatchErr = s.bankSlipSink.HandleBankSlipEvent(ctx, event)
+		} else {
+			slog.Info("webhook: boleto/bolepix event stored, no sink registered", "external_id", event.ExternalID)
+		}
 	default:
 		slog.Warn("webhook: unknown service in inbound event", "service", event.Service)
 	}

@@ -28,3 +28,12 @@ type InboundParser interface {
 type CheckoutEventSink interface {
 	HandleCheckoutEvent(ctx context.Context, event domain.InboundEvent) error
 }
+
+// BankSlipEventSink is implemented by the boleto feature and registered with
+// the webhook service at wiring time (same rationale as CheckoutEventSink).
+// It reconciles the notified status onto our local bank slip bookkeeping so
+// downstream consumers (e.g. access control / delinquency) can react when a
+// boleto is settled (status PAID) or otherwise changes.
+type BankSlipEventSink interface {
+	HandleBankSlipEvent(ctx context.Context, event domain.InboundEvent) error
+}

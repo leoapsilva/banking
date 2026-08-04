@@ -3,6 +3,9 @@ docs/c6/auth/
 *.env
 .env
 .env.*
+# Contains a live C6 sandbox access token embedded for AT_01 evidence -
+# never commit (short-lived, but no reason to leak it into git history).
+docs/c6/homologação/v3.0/Roteiro de Testes - C6 Developers v3.0.PREENCHIDO_2026-07-13.docx
 
 # Go
 /bin/

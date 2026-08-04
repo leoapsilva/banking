@@ -123,21 +123,19 @@ conformidade_Boleto_PIX_Pagamentos_Checkout.docx`):
 | Boleto (itens 1-6) | ✅ completa | item 4.b (baixa de vencido) é uma aproximação: testamos com `due_date` = hoje, já que nossa validação rejeita `due_date` no passado e não há como simular um boleto vencido há dias no sandbox — validar manualmente antes de submeter o roteiro ao C6 |
 | PIX (item 7) | ✅ completa | 8/8 |
 | DDA/Agendamento (item 8) | ✅ completa | 7/7 testes passando contra o sandbox real (8.1-8.6). Descoberta durante a validação: `POST /decode` é **assíncrono** — retorna o `group_id` na hora, mas o C6 decodifica cada item (integridade do boleto/chave PIX, consulta DICT) em segundo plano; uma consulta imediata a `GET /{group_id}/items` pode retornar `422` ("ainda estão no processo de decodificação"). O adapter (`internal/provider/c6/paymentscheduling_adapter.go`) já trata isso com retry/backoff (até ~30s) antes de propagar erro. |
-| Checkout C6 Pay (itens 9-13) | ⚠️ quase completa | item 12.b (capturar com token) não tem teste: `POST /v1/checkouts/authorize` existe internamente (usado pelo worker de assinaturas) mas não está exposto como rota HTTP pública — decisão pendente sobre expô-la |
+| Checkout C6 Pay (itens 9-13) | ✅ quase completa | **Atualização 2026-07-07: o Checkout passou a funcionar contra o sandbox real** — 9.a/9.b/9.c/12.a → `201`, 10.a → `200`, 11.a → `204` (8/9 testes passando; a única falha é `09`, que é InfinitePay, não C6). O C6 habilitou o produto Checkout/C6 Pay para a credencial em algum momento entre 22/jun (ainda dava 502/401) e 07/jul. Pendências que não saem só do Bruno: item 12.b (capturar com token — `POST /v1/checkouts/authorize` existe internamente, usado pelo worker de assinaturas, mas não é rota HTTP pública) e item 13 (registrar webhook do checkout — flag `--include-webhook-register`, efeito colateral persistente) |
 
-**Status conhecido por produto** (validado em 2026-06-19, dentro do
-horário 7h-23h do sandbox — ver `docs/c6/auth/email_c6.txt`): com as
-mesmas credenciais, **PIX e Boleto funcionam de ponta a ponta** contra o
-sandbox real (19/19 e 10/10 nos testes); **Checkout retorna `401 Não
-autorizado` de forma consistente** em todas as tentativas (incluindo as
-variantes débito, autenticação opcional e tokenização), em qualquer
-horário testado — não é problema de horário nem bug da aplicação (o erro
-chega intacto do C6, autenticação funciona normalmente para os outros
-produtos com a mesma credencial). Indica que o produto Checkout/C6 Pay
-especificamente ainda não está habilitado para esta credencial —
-confirmar/ativar com o C6. `subscriptions` herda essa mesma falha: toda
-assinatura cria um checkout internamente na primeira cobrança, então não é
-uma causa independente.
+**Status conhecido por produto**: com as mesmas credenciais, **PIX, Boleto
+e Checkout funcionam de ponta a ponta** contra o sandbox real. PIX e Boleto
+já funcionavam desde 2026-06-19 (19/19 e 10/10 nos testes). O **Checkout**
+retornava `401 Não autorizado` de forma consistente até 22/jun (o produto
+Checkout/C6 Pay ainda não estava habilitado para a credencial), mas
+**passou a funcionar em 2026-07-07** (9.a/9.b/9.c/12.a → `201`, 10.a →
+`200`, 11.a → `204`), indicando que o C6 habilitou o produto para a
+credencial nesse intervalo. `subscriptions` dependia dessa mesma
+habilitação (toda assinatura cria um checkout internamente na primeira
+cobrança), então deve passar a funcionar junto. Sandbox opera das 7h às 23h
+(ver `docs/c6/auth/email_c6.txt`).
 
 Também observado: alterar ou baixar um boleto **imediatamente** após
 emiti-lo pode retornar `400` com `"Evento não pode ser realizado, pois já

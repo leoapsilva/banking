@@ -74,6 +74,28 @@ func (c *Client) Do(ctx context.Context, method, path string, reqBody, respBody 
 	return nil
 }
 
+// DoRaw performs a request and returns the raw response body on success,
+// without JSON-decoding it. Used for endpoints that return a non-JSON
+// payload — e.g. C6's GET /bank_slips/{id}/pdf, which despite the swagger's
+// "base64_pdf_file" schema actually streams the raw PDF bytes
+// (Content-Type application/pdf). Same 401-refresh-and-retry as Do.
+func (c *Client) DoRaw(ctx context.Context, method, path string) ([]byte, error) {
+	status, body, err := c.doOnce(ctx, method, path, nil, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusUnauthorized {
+		status, body, err = c.doOnce(ctx, method, path, nil, nil, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if status < 200 || status >= 300 {
+		return nil, &APIError{StatusCode: status, Body: string(body)}
+	}
+	return body, nil
+}
+
 func (c *Client) doOnce(ctx context.Context, method, path string, reqBody, respBody any, forceRefresh bool) (status int, rawBody []byte, err error) {
 	var token string
 	if forceRefresh {

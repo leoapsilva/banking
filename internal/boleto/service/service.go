@@ -8,6 +8,7 @@ import (
 	"github.com/upwifi/banking/internal/boleto/domain"
 	"github.com/upwifi/banking/internal/boleto/repository"
 	"github.com/upwifi/banking/internal/platform/providerregistry"
+	webhookdomain "github.com/upwifi/banking/internal/webhook/domain"
 
 	boletofeature "github.com/upwifi/banking/internal/boleto"
 )
@@ -81,6 +82,20 @@ func (s *Service) GetBankSlip(ctx context.Context, baas domain.BaaS, providerBan
 	return details, nil
 }
 
+// GetBankSlipPDF fetches the boleto rendered as raw PDF bytes from the
+// selected provider. C6 generates the PDF; we only proxy it.
+func (s *Service) GetBankSlipPDF(ctx context.Context, baas domain.BaaS, providerBankSlipID string) ([]byte, error) {
+	provider, err := s.resolveProvider(baas)
+	if err != nil {
+		return nil, err
+	}
+	pdf, err := provider.GetPDF(ctx, providerBankSlipID)
+	if err != nil {
+		return nil, fmt.Errorf("boleto: get pdf via provider: %w", err)
+	}
+	return pdf, nil
+}
+
 // UpdateBankSlip alters due date, amount, discount, interest and/or fine on
 // a previously issued bank slip.
 func (s *Service) UpdateBankSlip(ctx context.Context, baas domain.BaaS, providerBankSlipID string, req domain.UpdateBankSlipRequest) (domain.BankSlipDetails, error) {
@@ -113,6 +128,40 @@ func (s *Service) CancelBankSlip(ctx context.Context, baas domain.BaaS, provider
 		return fmt.Errorf("boleto: cancel via provider: %w", err)
 	}
 	return s.repo.UpdateStatus(ctx, baas, providerBankSlipID, domain.StatusCancelled)
+}
+
+// HandleBankSlipEvent processes an inbound C6 bank slip notification,
+// reconciling the notified status onto our local bookkeeping so downstream
+// consumers (access control / delinquency) can react when a boleto is
+// settled (PAID) or otherwise changes. C6's webhook carries only external_id
+// (the provider bank slip id) + status, with no payment details, so we
+// reconcile the status alone.
+func (s *Service) HandleBankSlipEvent(ctx context.Context, event webhookdomain.InboundEvent) error {
+	status, ok := mapWebhookStatus(event.Status)
+	if !ok {
+		// A status we don't track (or empty) — nothing to reconcile.
+		return nil
+	}
+	baas := domain.BaaS(event.BaaS)
+	// Confirm the notified bank slip is one of ours before touching it.
+	if _, err := s.repo.GetByProviderID(ctx, baas, event.ExternalID); err != nil {
+		return fmt.Errorf("boleto: webhook for unknown bank slip %q: %w", event.ExternalID, err)
+	}
+	if err := s.repo.UpdateStatus(ctx, baas, event.ExternalID, status); err != nil {
+		return fmt.Errorf("boleto: webhook reconcile status: %w", err)
+	}
+	return nil
+}
+
+// mapWebhookStatus maps a C6 webhook status string onto our bank slip status
+// vocabulary, returning ok=false for anything we don't track.
+func mapWebhookStatus(raw string) (domain.Status, bool) {
+	switch domain.Status(raw) {
+	case domain.StatusCreated, domain.StatusPaid, domain.StatusCancelled:
+		return domain.Status(raw), true
+	default:
+		return "", false
+	}
 }
 
 func validateCreate(req domain.CreateBankSlipRequest) error {

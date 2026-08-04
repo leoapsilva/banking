@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -26,6 +27,7 @@ func New(svc *service.Service) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/bank-slips", h.create)
 	mux.HandleFunc("GET /v1/bank-slips/{id}", h.get)
+	mux.HandleFunc("GET /v1/bank-slips/{id}/pdf", h.getPDF)
 	mux.HandleFunc("PUT /v1/bank-slips/{id}", h.update)
 	mux.HandleFunc("PUT /v1/bank-slips/{id}/cancel", h.cancel)
 }
@@ -270,6 +272,41 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detailsToResponse(details))
+}
+
+type bankSlipPDFResponse struct {
+	ID            string `json:"id"`
+	Base64PDFFile string `json:"base64_pdf_file"`
+}
+
+// getPDF proxies C6's "gerar PDF do boleto" (GET /bank_slips/{id}/pdf). By
+// default it returns JSON with the Base64-encoded PDF (consistent with the
+// rest of the API and directly usable as homologation evidence); with
+// ?format=pdf it decodes and streams the binary as application/pdf so a
+// front-end can display/download it directly.
+func (h *Handler) getPDF(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	baas := r.URL.Query().Get("baas")
+	if baas == "" {
+		writeError(w, http.StatusBadRequest, "baas query parameter is required")
+		return
+	}
+
+	pdf, err := h.svc.GetBankSlipPDF(r.Context(), domain.BaaS(baas), id)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	if r.URL.Query().Get("format") == "pdf" {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Header().Set("Content-Disposition", `inline; filename="`+id+`.pdf"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(pdf)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, bankSlipPDFResponse{ID: id, Base64PDFFile: base64.StdEncoding.EncodeToString(pdf)})
 }
 
 type updateBankSlipPayload struct {

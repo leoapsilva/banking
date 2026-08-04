@@ -112,6 +112,7 @@ func run() error {
 	boletoRepository := boletorepo.New(pool)
 	boletoSvc := boletoservice.New(registry, boletoRepository)
 	boletoHandlerInst := boletohandler.New(boletoSvc)
+	webhookSvc.SetBankSlipSink(boletoSvc)
 
 	pixRepository := pixrepo.New(pool)
 	pixSvc := pixservice.New(registry, pixRepository)
