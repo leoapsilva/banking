@@ -43,7 +43,19 @@ services:
       C6_MTLS_KEY_PATH: /certs/c6.key
       HTTP_ADDR: ":8082"
     ports:
-      - "${HTTP_PORT:-8082}:8082"
+      # Bind explícito em 127.0.0.1: o banking movimenta dinheiro e não tem
+      # nada que precise ser alcançado da internet. Sem o prefixo de host, o
+      # Docker publica em 0.0.0.0 e a porta fica exposta — inclusive furando
+      # regras de firewall, porque o Docker escreve direto no iptables.
+      #
+      # Quem consome esta API (hoje só o backend do Cores) fala pela rede
+      # `shared` abaixo, usando o hostname `banking:8082`. Os webhooks dos
+      # provedores chegam pelo reverse proxy do host, que só encaminha
+      # /webhooks/* para 127.0.0.1.
+      - "127.0.0.1:${HTTP_PORT:-8082}:8082"
+    networks:
+      - default
+      - shared
     volumes:
       # C6 sandbox mTLS credentials. These live outside version control
       # (see ../.gitignore) and must exist locally before `docker compose up`.
@@ -56,6 +68,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+networks:
+  # Rede compartilhada com o compose do Cores, que roda na mesma VPS. É por
+  # ela que o backend do Cores alcança `http://banking:8082` sem que nenhuma
+  # porta precise ser publicada no host.
+  #
+  # Criada uma vez, fora do compose:  docker network create cores-shared
+  # Declarada como external para que nenhum dos dois lados a destrua ao
+  # rodar `docker-compose down`.
+  shared:
+    external: true
+    name: cores-shared
 
 volumes:
   banking-postgres-data:

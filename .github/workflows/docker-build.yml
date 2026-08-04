@@ -1,0 +1,49 @@
+name: 🐳 Docker Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'docker/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'docker/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🐳 Build imagem PostgreSQL
+        uses: docker/build-push-action@v6
+        with:
+          context: ./docker/postgres
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 🐳 Build imagem Banking
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/banking/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: ✅ Imagens Docker construídas com sucesso!
+        run: echo "✅ Docker build passou!"

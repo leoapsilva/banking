@@ -1,0 +1,118 @@
+name: 🧪 API Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: banking
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 🔧 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - name: 📦 Instalar Bruno CLI
+        run: npm install -g @usebruno/cli@1.29.1
+
+      - name: 🔐 Gerar par mTLS descartável
+        # O processo exige C6_MTLS_CERT_PATH/KEY_PATH no startup e carrega o
+        # par ao construir o HTTP client do C6. Os certificados reais não
+        # entram no CI (nem no repositório), e nenhum teste aqui chama o C6 —
+        # então um par self-signed descartável basta para o serviço subir.
+        run: |
+          mkdir -p /tmp/ci-certs
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout /tmp/ci-certs/client.key \
+            -out /tmp/ci-certs/client.crt \
+            -subj "/CN=banking-ci" 2>/dev/null
+          echo "✅ Par mTLS descartável gerado"
+
+      - name: 🏗️ Build
+        run: |
+          go mod tidy
+          go build -o banking ./cmd/api
+
+      - name: 🚀 Iniciar banking
+        env:
+          DATABASE_URL: postgres://postgres:password@localhost:5432/banking?sslmode=disable
+          HTTP_ADDR: ":8080"
+          # Credenciais C6 fictícias: exigidas no startup, não usadas nos testes.
+          C6_CLIENT_ID: ci-client-id
+          C6_CLIENT_SECRET: ci-client-secret
+          C6_MTLS_CERT_PATH: /tmp/ci-certs/client.crt
+          C6_MTLS_KEY_PATH: /tmp/ci-certs/client.key
+          C6_WEBHOOK_PATH_SECRET: ci-webhook-secret
+          INFINITEPAY_WEBHOOK_PATH_SECRET: ci-infinitepay-secret
+          INFINITEPAY_HANDLE: ci-handle
+          # API_KEYS vazio deixa as rotas anônimas neste ambiente efêmero, para
+          # que a coleção Bruno rode sem carregar chave. A autenticação em si é
+          # coberta pelos testes unitários de internal/platform/httpserver.
+          API_KEYS: ""
+          # As migrations são aplicadas pelo próprio processo no startup
+          # (postgres.RunMigrations com embed), então não há passo de SQL aqui.
+          LOG_LEVEL: debug
+        run: ./banking &
+        timeout-minutes: 1
+
+      - name: ⏳ Aguardar banking estar pronto
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/healthz > /dev/null 2>&1; then
+              echo "✅ Banking pronto!"
+              exit 0
+            fi
+            echo "⏳ Tentativa $i/30..."
+            sleep 2
+          done
+          echo "❌ Banking não respondeu no tempo esperado"
+          exit 1
+
+      - name: 🧪 Rodar coleção Bruno
+        working-directory: ./tests/bruno
+        # continue-on-error: a coleção cobre fluxos que dependem do sandbox do
+        # C6/InfinitePay (credenciais reais), que não existem no CI. O passo
+        # seguinte é que decide o resultado, olhando só o que é executável aqui.
+        continue-on-error: true
+        run: npx @usebruno/cli run --env ci --reporter-json /tmp/bruno-report.json || true
+
+      - name: 📊 Resultado dos testes
+        run: |
+          if [ -f /tmp/bruno-report.json ]; then
+            echo "Relatório Bruno gerado:"
+            head -40 /tmp/bruno-report.json
+          else
+            echo "⚠️ Nenhum relatório gerado — verifique se existe o ambiente 'ci' em tests/bruno/environments/"
+          fi

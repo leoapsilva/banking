@@ -1,0 +1,55 @@
+name: 🔨 Build & Lint
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/backend-build.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+
+      - name: 🔍 Verificar go.sum atualizado
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+
+      - name: 🏗️ Build
+        run: go build -v ./...
+
+      - name: 🔍 Lint com golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: 'latest'
+          args: --timeout=5m
+
+      - name: ✅ Go vet
+        run: go vet ./...
+
+      - name: 🧪 Testes unitários
+        # O banking guarda as regras de dinheiro (preço, cupom, validação de
+        # webhook) em domínio puro, justamente para serem testáveis sem banco
+        # nem provedor. Rodar aqui é barato e cobre o que mais dói errar.
+        run: go test -race ./...

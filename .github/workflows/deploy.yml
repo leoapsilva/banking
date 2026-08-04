@@ -1,0 +1,136 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        shell: bash
+        env:
+          # Secrets obrigatórios (VPS) — os mesmos do repositório do Cores,
+          # já que os dois serviços moram na mesma máquina:
+          # - VPS_HOST
+          # - VPS_USER
+          # - VPS_PORT
+          # - VPS_SSH_KEY (BASE64 do arquivo da chave privada)
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          if ! printf '%s' "$VPS_SSH_KEY" | base64 -d > ~/.ssh/deploy_key; then
+            echo "❌ Falha ao decodificar VPS_SSH_KEY (deve conter BASE64 da chave privada)."
+            exit 1
+          fi
+
+          sed -i 's/\r$//' ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null || { echo "❌ VPS_SSH_KEY inválida"; exit 1; }
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" << EOF
+            set -e
+            exec > >(tee -a ~/banking/deploy.log) 2>&1
+            echo "=== Deploy banking \$(date '+%Y-%m-%d %H:%M:%S') ==="
+            cd ~/banking
+
+            echo "▶ Atualizando repositório..."
+            git fetch "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git" main
+            git checkout main
+            git reset --hard FETCH_HEAD
+
+            # O .env e os certificados mTLS do C6 vivem apenas na VPS e nunca
+            # passam pelo CI: são montados read-only no compose. Falhar cedo é
+            # melhor do que subir um container que não consegue autenticar.
+            echo "▶ Verificando pré-requisitos locais..."
+            test -f docker/.env || { echo "❌ docker/.env ausente na VPS"; exit 1; }
+
+            echo "▶ Buildando container..."
+            cd docker
+            docker-compose build
+
+            echo "▶ Iniciando services..."
+            docker-compose up -d
+
+            echo "▶ Aguardando postgres ficar saudável..."
+            for i in \$(seq 1 30); do
+              if docker-compose exec -T postgres pg_isready -q < /dev/null 2>/dev/null; then
+                echo "  postgres pronto"
+                break
+              fi
+              echo "  aguardando postgres... (\$i/30)"
+              sleep 2
+            done
+
+            # As migrations são aplicadas pelo próprio processo no startup
+            # (postgres.RunMigrations, com os .sql embutidos no binário), então
+            # não há passo de migration aqui — subir o container já migra.
+
+            echo "▶ Verificando saúde do banking..."
+            OK=0
+            for i in \$(seq 1 10); do
+              if curl -sf "http://127.0.0.1:\${HTTP_PORT:-8082}/healthz" -o /dev/null; then
+                echo "✓ Banking respondendo em 127.0.0.1:\${HTTP_PORT:-8082}"
+                OK=1
+                break
+              fi
+              echo "  aguardando banking... (\$i/10)"
+              sleep 3
+            done
+            [ "\$OK" = "1" ] || { echo "❌ Banking não respondeu"; docker-compose logs --tail=50 banking; exit 1; }
+
+            # O banking não é exposto à internet: só o backend do Cores fala
+            # com ele, pela rede Docker interna. Esta checagem falha o deploy
+            # se a porta acabar publicada em 0.0.0.0 por engano.
+            echo "▶ Conferindo que a porta não está publicada externamente..."
+            if docker-compose ps 2>/dev/null | grep -q '0\.0\.0\.0:'; then
+              echo "❌ Porta publicada em 0.0.0.0 — o banking deve escutar apenas em 127.0.0.1 ou na rede Docker interna."
+              docker-compose ps
+              exit 1
+            fi
+            echo "✓ Porta não exposta publicamente"
+
+            echo "▶ Status dos serviços:"
+            docker-compose ps
+
+            echo "✓ Deploy concluído!"
+          EOF
+
+      - name: Notify by email on failure
+        if: failure()
+        # Mesmos secrets SMTP do repositório do Cores:
+        # SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, MAIL_TO, MAIL_FROM
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "❌ Deploy falhou: ${{ github.repository }} @ ${{ github.ref_name }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: ${{ secrets.MAIL_FROM }}
+          secure: false
+          body: |
+            O deploy do banking para a VPS falhou.
+
+            Repositório: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Autor: ${{ github.actor }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
