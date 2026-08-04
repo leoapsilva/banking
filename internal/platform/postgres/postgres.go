@@ -75,11 +75,11 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("postgres: begin tx for %s: %w", name, err)
 		}
 		if _, err := tx.Exec(ctx, string(contents)); err != nil {
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx) // best-effort: the transaction is being abandoned either way
 			return fmt.Errorf("postgres: apply migration %s: %w", name, err)
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (filename) VALUES ($1)`, name); err != nil {
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx)
 			return fmt.Errorf("postgres: record migration %s: %w", name, err)
 		}
 		if err := tx.Commit(ctx); err != nil {

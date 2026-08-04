@@ -25,19 +25,6 @@ func ToC6InterestType(t domain.InterestType) (string, error) {
 	}
 }
 
-func fromC6InterestType(s string) *domain.InterestType {
-	var t domain.InterestType
-	switch s {
-	case "BY_ISSUER":
-		t = domain.InterestCustomerAbsorbed
-	case "BY_SELLER":
-		t = domain.InterestMerchantAbsorbed
-	default:
-		return nil
-	}
-	return &t
-}
-
 // FromC6Status translates C6 checkout statuses to our unified Status enum.
 func FromC6Status(s string) domain.Status {
 	switch s {

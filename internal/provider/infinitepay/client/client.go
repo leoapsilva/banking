@@ -69,7 +69,7 @@ func (c *Client) Do(ctx context.Context, method, path string, reqBody, respBody 
 		slog.Error("infinitepay api call failed", "method", method, "url", url, "error", err)
 		return fmt.Errorf("infinitepay/client: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	duration := time.Since(start)
