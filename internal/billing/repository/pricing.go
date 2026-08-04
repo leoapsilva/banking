@@ -1,0 +1,93 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/upwifi/banking/internal/billing/domain"
+)
+
+// GetPlan loads an active plan by its code. Inactive or unknown codes return
+// domain.ErrPlanNotFound so the handler can answer 422 rather than 500.
+func (r *Repository) GetPlan(ctx context.Context, code string) (domain.Plan, error) {
+	const q = `
+		SELECT code, description, frequency, amount_cents, currency, active
+		FROM billing_plans
+		WHERE code = $1 AND active`
+
+	var p domain.Plan
+	var freq string
+	err := r.pool.QueryRow(ctx, q, code).Scan(
+		&p.Code, &p.Description, &freq, &p.Amount.AmountCents, &p.Amount.Currency, &p.Active,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Plan{}, domain.ErrPlanNotFound
+	}
+	if err != nil {
+		return domain.Plan{}, fmt.Errorf("billing: load plan: %w", err)
+	}
+	p.Frequency = domain.Frequency(freq)
+	return p, nil
+}
+
+// GetCoupon loads a coupon by code. Unknown codes return
+// domain.ErrCouponNotFound. Validity is not checked here — that is the
+// domain's job (Coupon.Validate), so the rules stay testable without a DB.
+func (r *Repository) GetCoupon(ctx context.Context, code string) (domain.Coupon, error) {
+	const q = `
+		SELECT code, percent_off, amount_off_cents, applicable_frequencies,
+		       duration, valid_from, valid_until, max_redemptions, redemptions_count
+		FROM billing_coupons
+		WHERE code = $1`
+
+	var c domain.Coupon
+	var freqs []string
+	var duration string
+	err := r.pool.QueryRow(ctx, q, code).Scan(
+		&c.Code, &c.PercentOff, &c.AmountOffCents, &freqs,
+		&duration, &c.ValidFrom, &c.ValidUntil, &c.MaxRedemptions, &c.RedemptionsCount,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Coupon{}, domain.ErrCouponNotFound
+	}
+	if err != nil {
+		return domain.Coupon{}, fmt.Errorf("billing: load coupon: %w", err)
+	}
+	c.Duration = domain.CouponDuration(duration)
+	for _, f := range freqs {
+		c.ApplicableFrequencies = append(c.ApplicableFrequencies, domain.Frequency(f))
+	}
+	return c, nil
+}
+
+// RedeemCoupon increments the redemption counter, refusing to exceed
+// max_redemptions. The check lives in the UPDATE predicate so two concurrent
+// redemptions of the last available slot cannot both succeed.
+//
+// Returns false when the coupon was already exhausted.
+func (r *Repository) RedeemCoupon(ctx context.Context, code string) (bool, error) {
+	const q = `
+		UPDATE billing_coupons
+		SET redemptions_count = redemptions_count + 1
+		WHERE code = $1
+		  AND (max_redemptions IS NULL OR redemptions_count < max_redemptions)`
+
+	tag, err := r.pool.Exec(ctx, q, code)
+	if err != nil {
+		return false, fmt.Errorf("billing: redeem coupon: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// SetPlanAndCoupon records which plan and coupon a subscription was created
+// under, so a renewal can reproduce the amount.
+func (r *Repository) SetPlanAndCoupon(ctx context.Context, subID any, planCode string, couponCode *string) error {
+	const q = `UPDATE subscriptions SET plan_code = $2, coupon_code = $3 WHERE id = $1`
+	if _, err := r.pool.Exec(ctx, q, subID, planCode, couponCode); err != nil {
+		return fmt.Errorf("billing: set plan/coupon: %w", err)
+	}
+	return nil
+}
