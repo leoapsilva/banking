@@ -3,9 +3,18 @@ docs/c6/auth/
 *.env
 .env
 .env.*
+# ...except the templates. They carry only placeholders and are the only
+# documentation of which variables the service needs; ignoring them meant a
+# fresh clone had no way to know how to configure the app.
+!.env.example
+!**/.env.example
 # Contains a live C6 sandbox access token embedded for AT_01 evidence -
 # never commit (short-lived, but no reason to leak it into git history).
 docs/c6/homologação/v3.0/Roteiro de Testes - C6 Developers v3.0.PREENCHIDO_2026-07-13.docx
+
+# Reference/browsing material, not project docs - not meant to be committed
+docs/c6/homologação/
+docs/infinitepay/
 
 # Go
 /bin/

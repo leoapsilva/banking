@@ -55,11 +55,26 @@ jobs:
             git checkout main
             git reset --hard FETCH_HEAD
 
-            # O .env e os certificados mTLS do C6 vivem apenas na VPS e nunca
+            # Os .env e os certificados mTLS do C6 vivem apenas na VPS e nunca
             # passam pelo CI: são montados read-only no compose. Falhar cedo é
             # melhor do que subir um container que não consegue autenticar.
+            #
+            # São dois arquivos, com papéis diferentes:
+            #   .env         → variáveis do processo (env_file no compose)
+            #   docker/.env  → interpolação do compose (portas, caminhos dos certs)
             echo "▶ Verificando pré-requisitos locais..."
-            test -f docker/.env || { echo "❌ docker/.env ausente na VPS"; exit 1; }
+            test -f .env        || { echo "❌ .env ausente na raiz (variáveis do serviço)"; exit 1; }
+            test -f docker/.env || { echo "❌ docker/.env ausente (interpolação do compose)"; exit 1; }
+
+            # Sem API_KEYS preenchido o serviço sobe com todas as rotas
+            # anônimas. Em produção isso não é aceitável: qualquer coisa na
+            # rede poderia cancelar assinaturas.
+            grep -qE '^API_KEYS=.+' .env || { echo "❌ API_KEYS vazio ou ausente no .env — produção não pode rodar anônima"; exit 1; }
+
+            # A rede compartilhada é criada uma vez, fora do compose. Sem ela
+            # o compose falha com um erro pouco óbvio sobre rede externa.
+            docker network inspect cores-shared >/dev/null 2>&1 || {
+              echo "❌ rede 'cores-shared' não existe. Crie com: docker network create cores-shared"; exit 1; }
 
             echo "▶ Buildando container..."
             cd docker
