@@ -38,9 +38,28 @@ type contextKey string
 
 const requestIDKey contextKey = "request_id"
 
+const callerKey contextKey = "api_caller"
+
 // RequestID extracts the request id assigned by RequestLogger, if present.
 func RequestID(ctx context.Context) string {
 	if v, ok := ctx.Value(requestIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithCaller records the authenticated API caller's name on the context.
+func WithCaller(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, callerKey, name)
+}
+
+// Caller returns the API caller authenticated by APIKeyAuth, or "" when the
+// route was exempt from authentication.
+//
+// Handlers use this to scope ownership: a caller may only act on resources
+// it created, rather than on any id it can guess.
+func Caller(ctx context.Context) string {
+	if v, ok := ctx.Value(callerKey).(string); ok {
 		return v
 	}
 	return ""

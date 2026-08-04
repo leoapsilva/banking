@@ -9,6 +9,9 @@ import (
 	"syscall"
 	"time"
 
+	billinghandler "github.com/upwifi/banking/internal/billing/handler"
+	billingrepo "github.com/upwifi/banking/internal/billing/repository"
+	billingservice "github.com/upwifi/banking/internal/billing/service"
 	boletohandler "github.com/upwifi/banking/internal/boleto/handler"
 	boletorepo "github.com/upwifi/banking/internal/boleto/repository"
 	boletoservice "github.com/upwifi/banking/internal/boleto/service"
@@ -32,9 +35,6 @@ import (
 	c6client "github.com/upwifi/banking/internal/provider/c6/client"
 	infinitepayprovider "github.com/upwifi/banking/internal/provider/infinitepay"
 	infinitepayclient "github.com/upwifi/banking/internal/provider/infinitepay/client"
-	subscriptionhandler "github.com/upwifi/banking/internal/subscription/handler"
-	subscriptionrepo "github.com/upwifi/banking/internal/subscription/repository"
-	subscriptionservice "github.com/upwifi/banking/internal/subscription/service"
 	webhookhandler "github.com/upwifi/banking/internal/webhook/handler"
 	webhookrepo "github.com/upwifi/banking/internal/webhook/repository"
 	webhookservice "github.com/upwifi/banking/internal/webhook/service"
@@ -112,13 +112,13 @@ func run() error {
 		ClientID:  cfg.C6ExpectedClientID,
 		PartnerID: cfg.C6ExpectedPartnerID,
 	})
-	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.WebhookPathSecret, cfg.InfinitePayWebhookPathSecret)
+	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.C6WebhookURLToken, cfg.InfinitePayWebhookURLToken)
 
-	subscriptionRepository := subscriptionrepo.New(pool)
-	subscriptionSvc := subscriptionservice.New(subscriptionRepository, checkoutRepository, checkoutSvc)
-	subscriptionHandlerInst := subscriptionhandler.New(subscriptionSvc, cfg.InfinitePayPlanMonthlyURL)
+	billingRepository := billingrepo.New(pool)
+	billingSvc := billingservice.New(billingRepository, checkoutRepository, checkoutSvc)
+	billingHandlerInst := billinghandler.New(billingSvc, cfg.InfinitePayPlanMonthlyURL)
 
-	webhookSvc.SetCheckoutSink(subscriptionSvc)
+	webhookSvc.SetCheckoutSink(billingSvc)
 
 	boletoRepository := boletorepo.New(pool)
 	boletoSvc := boletoservice.New(registry, boletoRepository)
@@ -140,19 +140,40 @@ func run() error {
 	})
 	checkoutHandler.Register(mux)
 	webhookHandlerInst.Register(mux)
-	subscriptionHandlerInst.Register(mux)
+	billingHandlerInst.Register(mux)
 	boletoHandlerInst.Register(mux)
 	pixHandlerInst.Register(mux)
 	paymentSchedulingHandlerInst.Register(mux)
 
+	// Authentication wraps everything except /healthz and the provider
+	// webhook paths — providers call those and cannot hold our key; they
+	// carry their own secret in the URL and are validated separately.
+	apiKeyExempt := []string{"/healthz", "/webhooks/"}
+	if len(cfg.APIKeys) == 0 {
+		slog.Warn("API_KEYS is empty: every route is anonymous. Do not run like this outside local development.")
+	}
+
+	handler := httpserver.RequestLogger(cfg.LogHTTPBody)(
+		httpserver.APIKeyAuth(cfg.APIKeys, apiKeyExempt)(
+			http.MaxBytesHandler(mux, cfg.MaxRequestBodyBytes),
+		),
+	)
+
+	// Timeouts are mandatory, not tuning: without them a stalled client
+	// holds a connection and its goroutine indefinitely. WriteTimeout
+	// exceeds ReadTimeout because provider calls happen while writing.
 	server := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: httpserver.RequestLogger(cfg.LogHTTPBody)(mux),
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// --- Cron worker: recurring monthly billing cycles ---
 	worker := cronworker.New()
-	if err := worker.Schedule("charge-due-subscriptions", cfg.CronChargeInterval, subscriptionSvc.ChargeDueSubscriptions); err != nil {
+	if err := worker.Schedule("charge-due-subscriptions", cfg.CronChargeInterval, billingSvc.ChargeDueSubscriptions); err != nil {
 		return err
 	}
 	worker.Start()

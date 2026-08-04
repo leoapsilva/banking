@@ -220,7 +220,7 @@ Variáveis de ambiente necessárias para os endpoints InfinitePay funcionarem:
 | `INFINITEPAY_BASE_URL` | `https://api.checkout.infinitepay.io` | Endpoint da API InfinitePay |
 | `INFINITEPAY_HANDLE` | `meuhandle` | InfiniteTag sem `$` |
 | `INFINITEPAY_WEBHOOK_URL` | `https://banking.interno/webhooks/infinitepay/{secret}` | URL que a InfinitePay chamará ao aprovar pagamento |
-| `INFINITEPAY_WEBHOOK_PATH_SECRET` | `(gerado)` | Segmento secreto na URL do webhook |
+| `INFINITEPAY_WEBHOOK_URL_TOKEN` | `(gerado)` | Segmento secreto na URL do webhook |
 | `INFINITEPAY_PLAN_MONTHLY_URL` | `https://invoice.infinitepay.io/plans/...` | Link do plano mensal pré-criado no app InfinitePay |
 
 O banking **não registra** o endpoint de webhook com a InfinitePay centralmente —
@@ -244,4 +244,4 @@ POST /v1/webhooks/register
 | `POST /v1/checkouts` retorna `502` para InfinitePay | `INFINITEPAY_HANDLE` inválido ou handle não habilitado para Checkout na conta InfinitePay. |
 | `GET /v1/subscriptions/infinitepay/plans/monthly` retorna `503` | `INFINITEPAY_PLAN_MONTHLY_URL` não configurado no banking. |
 | `PUT /v1/subscriptions/{id}/cancel` retorna `502` para C6 | Checkout já foi aprovado e a janela de cancelamento C6 expirou. |
-| Webhook InfinitePay não é processado | Verificar que `INFINITEPAY_WEBHOOK_PATH_SECRET` no banking corresponde ao segmento na URL registrada em `INFINITEPAY_WEBHOOK_URL`. |
+| Webhook InfinitePay não é processado | Verificar que `INFINITEPAY_WEBHOOK_URL_TOKEN` no banking corresponde ao segmento na URL registrada em `INFINITEPAY_WEBHOOK_URL`. |

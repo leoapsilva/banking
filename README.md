@@ -33,7 +33,7 @@ reescrito do zero).
    - `C6_MTLS_CERT_PATH`/`C6_MTLS_KEY_PATH` apontando para os arquivos em
      `docs/c6/auth/` (nunca comitar esses arquivos — já estão no
      `.gitignore`).
-   - `C6_WEBHOOK_PATH_SECRET` com um valor aleatório.
+   - `C6_WEBHOOK_URL_TOKEN` com um valor aleatório.
 
 2. Exporte as variáveis e rode:
 
@@ -84,14 +84,14 @@ da criação para usar na consulta/cancelamento).
 
 ```sh
 cd tests/bruno
-npx @usebruno/cli run -r --env local --env-var C6_WEBHOOK_PATH_SECRET=<valor-do-.env>
+npx @usebruno/cli run -r --env local --env-var C6_WEBHOOK_URL_TOKEN=<valor-do-.env>
 ```
 
 Ou use o runner que já gera o relatório formatado (ver seção abaixo):
 
 ```sh
 cd tests/bruno
-C6_WEBHOOK_PATH_SECRET=<valor-do-.env> ./run.sh
+C6_WEBHOOK_URL_TOKEN=<valor-do-.env> ./run.sh
 ```
 
 - `health/`: healthcheck.
@@ -167,7 +167,7 @@ orquestrados por `docker/docker-compose.yml`.
 1. Copie **os dois** arquivos de exemplo (são complementares, não
    alternativos):
    - `.env.example` (raiz) → `.env`: segredos do C6 (`C6_CLIENT_ID`,
-     `C6_CLIENT_SECRET`, `C6_WEBHOOK_PATH_SECRET`, etc.). O `banking` os
+     `C6_CLIENT_SECRET`, `C6_WEBHOOK_URL_TOKEN`, etc.). O `banking` os
      carrega de lá via `env_file` no compose — é o único lugar onde esses
      valores existem, usado tanto rodando com `go run` quanto via Docker.
    - `docker/.env.example` → `docker/.env`: só o que é específico da

@@ -139,7 +139,7 @@ func (c *Client) doOnce(ctx context.Context, method, path string, reqBody, respB
 		slog.Error("c6 api call failed", "method", method, "url", url, "error", err)
 		return 0, nil, fmt.Errorf("c6/client: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(resp.Body)
 	duration := time.Since(start)

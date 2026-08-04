@@ -3,6 +3,23 @@
 > Para o time/agente que implementa o **backend do site** (cliente da API do banking) para vender
 > assinaturas de app via InfinitePay. Use junto com [`openapi.yaml`](openapi.yaml).
 
+## ⚠️ Mudanças de contrato (ago/2026)
+
+**1. Autenticação obrigatória.** Toda chamada precisa do header `X-API-Key`. Sem ele: `401`.
+Apenas `/healthz` e `/webhooks/*` são isentos. Peça sua chave ao time do banking.
+
+**2. Você não envia mais o valor.** O endpoint preferencial passa a ser `POST /v1/subscriptions`
+com `plan` + `coupon_code` opcional; o banking resolve o preço a partir do catálogo. Isso existe
+para que "quanto este cliente paga" tenha uma resposta só, no banking — antes o valor vinha do
+cliente e o ciclo ficava aqui, então a pergunta precisava de dois sistemas para ser respondida.
+
+**3. `GET /v1/subscriptions/{id}` passou a existir.** É como você acompanha o estado da assinatura
+sem manter uma máquina de estados própria.
+
+Os endpoints antigos que recebem `amount_cents` (`/v1/subscriptions/annual`, `/monthly`,
+`/annual-installment`) seguem funcionando para os fluxos C6 existentes, mas **não use para
+integrações novas**.
+
 ## Os dois planos e seus fluxos
 
 | Plano | Como funciona | Quem gerencia a recorrência |
@@ -75,18 +92,42 @@ do redirect diga.
 ## Passo 1 — Criar a assinatura anual
 
 ```http
-POST /v1/subscriptions/annual
+POST /v1/subscriptions
 Content-Type: application/json
+X-API-Key: sua-chave
 
 {
   "baas": "infinitepay",
   "customer_name": "Maria Souza",
   "customer_email": "maria@email.com",
-  "amount_cents": 150000,
-  "currency": "BRL",
+  "plan": "cores-annual",
+  "coupon_code": "LANCAMENTO50",
   "redirect_url": "https://seusite.com/assinatura/concluida"
 }
 ```
+
+Resposta `201`:
+```json
+{
+  "subscription_id": "550e8400-...",
+  "checkout_id": "abc123",
+  "checkout_url": "https://checkout.infinitepay.com.br/abc123",
+  "amount_cents": 14995,
+  "list_amount_cents": 29990,
+  "currency": "BRL",
+  "discount_applied": "50% de desconto (ONCE)"
+}
+```
+
+- **Não envie valor.** O preço vem do plano cadastrado no banking. `amount_cents` na resposta é o
+  que será cobrado; `list_amount_cents` é o preço cheio — use os dois para exibir "de X por Y".
+- `coupon_code` é opcional. Cupom inválido, expirado, esgotado ou não aplicável ao plano →
+  `422` com a razão. Confirme antes da compra com
+  `GET /v1/coupons/{code}/validate?plan=cores-annual`.
+- Um cupom `ONCE` vale só no primeiro ciclo — a renovação volta ao preço cheio.
+
+> Se `plan` não existir ou estiver inativo, a resposta é `422`. Os planos são cadastrados por
+> ambiente; confirme o código com o time do banking.
 
 Pontos de atenção:
 - Não envie `installments` — o comprador decide quantas parcelas quer (até 12x) na página da InfinitePay.
@@ -207,7 +248,8 @@ A InfinitePay não oferece, e portanto o banking retorna erro explícito para `b
 - [ ] Nenhuma outra integração necessária — recorrência gerenciada pela InfinitePay.
 
 ### Plano Anual
-- [ ] `POST /v1/subscriptions/annual` com `baas: "infinitepay"`, `amount_cents`, `redirect_url`.
+- [ ] Enviar `X-API-Key` em todas as chamadas.
+- [ ] `POST /v1/subscriptions` com `baas: "infinitepay"`, `plan`, `redirect_url` — **sem valor**.
 - [ ] Redirecionar o navegador para `checkout_url` da resposta.
 - [ ] Na página de `redirect_url`, extrair `slug` da query string só para saber o que consultar —
       nunca para decidir se o pagamento foi confirmado.

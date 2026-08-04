@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/upwifi/banking/internal/billing/service"
 	checkoutdomain "github.com/upwifi/banking/internal/checkout/domain"
-	"github.com/upwifi/banking/internal/subscription/service"
 )
 
 type Handler struct {
@@ -20,9 +20,17 @@ func New(svc *service.Service, monthlyPlanURL string) *Handler {
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
+	// Preferred contract: the caller names a plan, billing prices it.
+	mux.HandleFunc("POST /v1/subscriptions", h.createFromPlan)
+	mux.HandleFunc("GET /v1/subscriptions/{id}", h.get)
+	mux.HandleFunc("GET /v1/coupons/{code}/validate", h.validateCoupon)
+
+	// Amount-carrying endpoints, kept for the existing C6 flows.
 	mux.HandleFunc("POST /v1/subscriptions/monthly", h.createMonthly)
 	mux.HandleFunc("POST /v1/subscriptions/annual-installment", h.createAnnualInstallment)
 	mux.HandleFunc("POST /v1/subscriptions/annual", h.createAnnualCheckout)
+
+	// Literal paths must be registered before "{id}" collides with them.
 	mux.HandleFunc("GET /v1/subscriptions/infinitepay/plans/monthly", h.getMonthlyPlanLink)
 	mux.HandleFunc("PUT /v1/subscriptions/{id}/cancel", h.cancel)
 }

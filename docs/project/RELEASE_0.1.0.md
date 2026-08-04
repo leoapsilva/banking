@@ -93,7 +93,7 @@ o mesmo desenho já usado para C6, só troca `"baas"`:
    /v1/checkouts/{id}`** esperando que isso dispare uma chamada à InfinitePay (não existe esse
    endpoint do lado deles). Duas formas de saber do pagamento, ambas internas/automáticas:
    - **Webhook (recomendado)**: a InfinitePay nos notifica em `POST
-     /webhooks/infinitepay/{pathSecret}` quando o comprador paga; nosso `webhook` service atualiza o
+     /webhooks/infinitepay/{urlToken}` quando o comprador paga; nosso `webhook` service atualiza o
      registro do checkout para `PAID` no banco. O cliente da nossa API não recebe esse webhook
      diretamente — ele continua consultando `GET /v1/checkouts/{id}?baas=infinitepay`, e essa rota
      simplesmente lê o status já atualizado no nosso banco (não chama a InfinitePay de novo).
@@ -192,13 +192,13 @@ A InfinitePay não documenta HMAC nem qualquer identificador de conta no corpo d
 do C6, que manda `client_id`/`partner_id` validáveis via `ExpectedOrigin`). Sem isso, qualquer um que
 descubra a URL do nosso webhook poderia forjar um payload de "pago". Mitigação em duas camadas:
 
-1. **`pathSecret` na rota** (já no item 4) — obscuridade básica, igual ao padrão do C6.
+1. **`urlToken` na rota** (já no item 4) — obscuridade básica, igual ao padrão do C6.
 2. **Correlação contra o registro que nós criamos** — antes de marcar como `PAID`, o
    `checkoutSink.HandleCheckoutEvent` (ou um passo antes, no próprio `InboundParser`/`service`) deve
    buscar o checkout local por `ProviderCheckoutID` (= `invoice_slug`) e confirmar que
    `order_nsu`/`amount` do payload batem com o que está persistido e que o checkout ainda não está em
    status terminal. Se não bater ou não existir, o evento é rejeitado/logado como suspeito em vez de
-   aplicado — assim um atacante precisaria adivinhar o `pathSecret` **e** um `slug`/`order_nsu`
+   aplicado — assim um atacante precisaria adivinhar o `urlToken` **e** um `slug`/`order_nsu`
    válidos nossos, não bastando só um dos dois.
 3. **Dedupe/idempotência adaptada**: a tabela `webhook_events` hoje dedupe por
    `(baas, external_id, status, event_date_time)`, chave que existe no envelope do C6 mas não no da
@@ -226,16 +226,16 @@ Se no futuro quisermos notificação em tempo real para o cliente, seria uma fea
   que é um gap consciente, não um descuido.
 
 ### 4. Roteamento do webhook inbound (`internal/webhook/handler/handler.go`)
-- Adicionar rota `POST /webhooks/infinitepay/{pathSecret}` análoga a `receiveC6`, reaproveitando
+- Adicionar rota `POST /webhooks/infinitepay/{urlToken}` análoga a `receiveC6`, reaproveitando
   `pathSecret` (mesma técnica de obscuridade por URL, já que a InfinitePay não documenta assinatura
-  HMAC) — pode reusar o mesmo secret de config ou um novo `INFINITEPAY_WEBHOOK_PATH_SECRET`.
+  HMAC) — pode reusar o mesmo secret de config ou um novo `INFINITEPAY_WEBHOOK_URL_TOKEN`.
 - `service.ProcessInbound(ctx, "infinitepay", body)` — reaproveita o método existente, que já
   despacha por BaaS via os `InboundParser`s registrados.
 
 ### 5. Wiring (`cmd/api/main.go`)
 - Ler novas envs: `INFINITEPAY_BASE_URL` (default `https://api.checkout.infinitepay.io`),
   `INFINITEPAY_HANDLE`, `INFINITEPAY_WEBHOOK_URL` (URL pública do nosso endpoint de webhook),
-  `INFINITEPAY_WEBHOOK_PATH_SECRET`.
+  `INFINITEPAY_WEBHOOK_URL_TOKEN`.
 - Criar `infinitepay/client.Client` (http.Client padrão, sem mTLS), `CheckoutAdapter`,
   `WebhookAdapter`.
 - `providerregistry.Register(registry, "checkout", "infinitepay", infinitePayCheckoutAdapter)`.

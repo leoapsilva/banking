@@ -115,7 +115,7 @@ func (tm *TokenManager) refresh(ctx context.Context) (string, error) {
 		slog.Error("c6 auth call failed", "url", tm.authURL, "error", err)
 		return "", fmt.Errorf("c6/auth: request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Intentionally never logs the request body (client_id/client_secret)
 	// or the response body (contains the access_token itself).

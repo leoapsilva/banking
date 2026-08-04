@@ -14,7 +14,7 @@ func TestTokenManager_CachesToken(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "tok-1",
 			"expires_in":   300,
 			"token_type":   "Bearer",
@@ -43,7 +43,7 @@ func TestTokenManager_ConcurrentRefreshIsSerialized(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "tok-concurrent",
 			"expires_in":   300,
 			"token_type":   "Bearer",
@@ -74,7 +74,7 @@ func TestTokenManager_ForceRefreshFetchesNewToken(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := calls.Add(1)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": map[int32]string{1: "tok-a", 2: "tok-b"}[minInt32(n, 2)],
 			"expires_in":   300,
 			"token_type":   "Bearer",
