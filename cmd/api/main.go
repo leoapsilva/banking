@@ -9,6 +9,9 @@ import (
 	"syscall"
 	"time"
 
+	billinghandler "github.com/upwifi/banking/internal/billing/handler"
+	billingrepo "github.com/upwifi/banking/internal/billing/repository"
+	billingservice "github.com/upwifi/banking/internal/billing/service"
 	boletohandler "github.com/upwifi/banking/internal/boleto/handler"
 	boletorepo "github.com/upwifi/banking/internal/boleto/repository"
 	boletoservice "github.com/upwifi/banking/internal/boleto/service"
@@ -32,9 +35,6 @@ import (
 	c6client "github.com/upwifi/banking/internal/provider/c6/client"
 	infinitepayprovider "github.com/upwifi/banking/internal/provider/infinitepay"
 	infinitepayclient "github.com/upwifi/banking/internal/provider/infinitepay/client"
-	billinghandler "github.com/upwifi/banking/internal/billing/handler"
-	billingrepo "github.com/upwifi/banking/internal/billing/repository"
-	billingservice "github.com/upwifi/banking/internal/billing/service"
 	webhookhandler "github.com/upwifi/banking/internal/webhook/handler"
 	webhookrepo "github.com/upwifi/banking/internal/webhook/repository"
 	webhookservice "github.com/upwifi/banking/internal/webhook/service"
@@ -145,9 +145,30 @@ func run() error {
 	pixHandlerInst.Register(mux)
 	paymentSchedulingHandlerInst.Register(mux)
 
+	// Authentication wraps everything except /healthz and the provider
+	// webhook paths — providers call those and cannot hold our key; they
+	// carry their own secret in the URL and are validated separately.
+	apiKeyExempt := []string{"/healthz", "/webhooks/"}
+	if len(cfg.APIKeys) == 0 {
+		slog.Warn("API_KEYS is empty: every route is anonymous. Do not run like this outside local development.")
+	}
+
+	handler := httpserver.RequestLogger(cfg.LogHTTPBody)(
+		httpserver.APIKeyAuth(cfg.APIKeys, apiKeyExempt)(
+			http.MaxBytesHandler(mux, cfg.MaxRequestBodyBytes),
+		),
+	)
+
+	// Timeouts are mandatory, not tuning: without them a stalled client
+	// holds a connection and its goroutine indefinitely. WriteTimeout
+	// exceeds ReadTimeout because provider calls happen while writing.
 	server := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: httpserver.RequestLogger(cfg.LogHTTPBody)(mux),
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// --- Cron worker: recurring monthly billing cycles ---

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all environment-driven configuration for the service.
@@ -35,6 +36,17 @@ type Config struct {
 
 	LogLevel    string // debug, info, warn, error
 	LogHTTPBody bool   // log request/response bodies (debug only; never logs Authorization/secrets)
+
+	// APIKeys maps a caller name to its secret, parsed from API_KEYS in the
+	// form "name:secret,other:secret". Callers present the secret in the
+	// X-API-Key header; the name is what appears in logs and scopes
+	// ownership. Empty disables authentication entirely — only acceptable
+	// for local development, and logged loudly at startup.
+	APIKeys map[string]string
+
+	// MaxRequestBodyBytes caps request bodies so a single caller cannot
+	// exhaust memory. Webhook payloads are the largest legitimate body.
+	MaxRequestBodyBytes int64
 }
 
 // Load reads configuration from environment variables. Required fields
@@ -61,6 +73,8 @@ func Load() (*Config, error) {
 		CronChargeInterval:           getEnvDefault("CRON_CHARGE_INTERVAL", "@hourly"),
 		LogLevel:                     getEnvDefault("LOG_LEVEL", "info"),
 		LogHTTPBody:                  getEnvDefault("LOG_HTTP_BODY", "false") == "true",
+		APIKeys:                      parseAPIKeys(os.Getenv("API_KEYS")),
+		MaxRequestBodyBytes:          parseBytes(getEnvDefault("MAX_REQUEST_BODY_BYTES", "1048576")),
 	}
 
 	required := map[string]string{
@@ -93,6 +107,42 @@ func getEnvDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// parseAPIKeys reads "name:secret,other:secret" into a map of caller name to
+// secret. Malformed entries are skipped rather than failing startup, so one
+// bad entry cannot take the service down — but every skip is visible because
+// the resulting key simply will not authenticate.
+//
+// Returns nil for an empty value, which callers treat as "authentication
+// disabled".
+func parseAPIKeys(raw string) map[string]string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	keys := make(map[string]string)
+	for _, pair := range strings.Split(raw, ",") {
+		name, secret, ok := strings.Cut(strings.TrimSpace(pair), ":")
+		name, secret = strings.TrimSpace(name), strings.TrimSpace(secret)
+		if !ok || name == "" || secret == "" {
+			continue
+		}
+		keys[name] = secret
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return keys
+}
+
+// parseBytes parses a byte count, falling back to 1 MiB when the value is
+// absent or unparseable.
+func parseBytes(raw string) int64 {
+	v, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || v <= 0 {
+		return 1 << 20
+	}
+	return v
 }
 
 // MustAtoi parses an int env var, returning def on error/empty.
