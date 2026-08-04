@@ -112,7 +112,7 @@ func run() error {
 		ClientID:  cfg.C6ExpectedClientID,
 		PartnerID: cfg.C6ExpectedPartnerID,
 	})
-	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.WebhookPathSecret, cfg.InfinitePayWebhookPathSecret)
+	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.C6WebhookURLToken, cfg.InfinitePayWebhookURLToken)
 
 	billingRepository := billingrepo.New(pool)
 	billingSvc := billingservice.New(billingRepository, checkoutRepository, checkoutSvc)

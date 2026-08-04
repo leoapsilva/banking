@@ -74,8 +74,8 @@ jobs:
           C6_CLIENT_SECRET: ci-client-secret
           C6_MTLS_CERT_PATH: /tmp/ci-certs/client.crt
           C6_MTLS_KEY_PATH: /tmp/ci-certs/client.key
-          C6_WEBHOOK_PATH_SECRET: ci-webhook-secret
-          INFINITEPAY_WEBHOOK_PATH_SECRET: ci-infinitepay-secret
+          C6_WEBHOOK_URL_TOKEN: ci-webhook-secret
+          INFINITEPAY_WEBHOOK_URL_TOKEN: ci-infinitepay-secret
           INFINITEPAY_HANDLE: ci-handle
           # API_KEYS vazio deixa as rotas anônimas neste ambiente efêmero, para
           # que a coleção Bruno rode sem carregar chave. A autenticação em si é

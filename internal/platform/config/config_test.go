@@ -4,8 +4,8 @@ import "testing"
 
 func cfgWith(url, token string) *Config {
 	return &Config{
-		InfinitePayWebhookURL:        url,
-		InfinitePayWebhookPathSecret: token,
+		InfinitePayWebhookURL:      url,
+		InfinitePayWebhookURLToken: token,
 	}
 }
 
@@ -65,5 +65,28 @@ func TestOnlyURLSetRejected(t *testing.T) {
 func TestOnlyTokenSetRejected(t *testing.T) {
 	if err := validateInfinitePayWebhook(cfgWith("", "abc123")); err == nil {
 		t.Error("expected error when only the token is set")
+	}
+}
+
+// The client builds baseURL + "/links", so a base that already ends in /links
+// produces /links/links — a 404 that surfaces only when someone tries to pay.
+func TestBaseURLWithEndpointPathRejected(t *testing.T) {
+	c := &Config{InfinitePayBaseURL: "https://api.checkout.infinitepay.io/links"}
+	if err := validateInfinitePayBaseURL(c); err == nil {
+		t.Error("expected error when the base URL already includes /links")
+	}
+}
+
+func TestBaseURLWithTrailingSlashAfterPathRejected(t *testing.T) {
+	c := &Config{InfinitePayBaseURL: "https://api.checkout.infinitepay.io/links/"}
+	if err := validateInfinitePayBaseURL(c); err == nil {
+		t.Error("expected error regardless of trailing slash")
+	}
+}
+
+func TestBaseURLHostOnlyAccepted(t *testing.T) {
+	c := &Config{InfinitePayBaseURL: "https://api.checkout.infinitepay.io"}
+	if err := validateInfinitePayBaseURL(c); err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

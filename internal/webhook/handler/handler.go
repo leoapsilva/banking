@@ -14,19 +14,19 @@ import (
 type Handler struct {
 	svc                   *service.Service
 	c6PathSecret          string
-	infinitePayPathSecret string
+	infinitePayURLToken string
 }
 
 // New creates the webhook handler. c6PathSecret is embedded in the C6 inbound
-// route for obscurity (C6 documents no HMAC signature). infinitePayPathSecret
+// route for obscurity (C6 documents no HMAC signature). infinitePayURLToken
 // serves the same purpose for the InfinitePay inbound route.
-func New(svc *service.Service, c6PathSecret, infinitePayPathSecret string) *Handler {
-	return &Handler{svc: svc, c6PathSecret: c6PathSecret, infinitePayPathSecret: infinitePayPathSecret}
+func New(svc *service.Service, c6PathSecret, infinitePayURLToken string) *Handler {
+	return &Handler{svc: svc, c6PathSecret: c6PathSecret, infinitePayURLToken: infinitePayURLToken}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /webhooks/c6/"+h.c6PathSecret, h.receiveC6)
-	mux.HandleFunc("POST /webhooks/infinitepay/"+h.infinitePayPathSecret, h.receiveInfinitePay)
+	mux.HandleFunc("POST /webhooks/infinitepay/"+h.infinitePayURLToken, h.receiveInfinitePay)
 	mux.HandleFunc("POST /v1/webhooks/register", h.register)
 }
 

@@ -21,16 +21,16 @@ type Config struct {
 	C6PartnerName    string
 	C6PartnerVersion string
 
-	WebhookPathSecret   string
+	C6WebhookURLToken   string
 	C6ExpectedClientID  string
 	C6ExpectedPartnerID string
 
 	// InfinitePay provider (all optional — deployment may use only C6)
-	InfinitePayBaseURL           string // default: https://api.checkout.infinitepay.io
-	InfinitePayHandle            string // InfiniteTag without leading '$'
-	InfinitePayWebhookURL        string // public URL of our POST /webhooks/infinitepay/{secret} endpoint
-	InfinitePayWebhookPathSecret string // path token for minimal obscurity on the inbound route
-	InfinitePayPlanMonthlyURL    string // pre-created monthly plan link from InfinitePay app
+	InfinitePayBaseURL         string // default: https://api.checkout.infinitepay.io
+	InfinitePayHandle          string // InfiniteTag without leading '$'
+	InfinitePayWebhookURL      string // public URL of our POST /webhooks/infinitepay/{secret} endpoint
+	InfinitePayWebhookURLToken string // path token for minimal obscurity on the inbound route
+	InfinitePayPlanMonthlyURL  string // pre-created monthly plan link from InfinitePay app
 
 	CronChargeInterval string // cron expression, default hourly
 
@@ -53,37 +53,37 @@ type Config struct {
 // return an error if missing so the process fails fast at startup.
 func Load() (*Config, error) {
 	cfg := &Config{
-		HTTPAddr:                     getEnvDefault("HTTP_ADDR", ":8080"),
-		DatabaseURL:                  os.Getenv("DATABASE_URL"),
-		C6Env:                        getEnvDefault("C6_ENV", "sandbox"),
-		C6ClientID:                   os.Getenv("C6_CLIENT_ID"),
-		C6ClientSecret:               os.Getenv("C6_CLIENT_SECRET"),
-		C6MTLSCertPath:               os.Getenv("C6_MTLS_CERT_PATH"),
-		C6MTLSKeyPath:                os.Getenv("C6_MTLS_KEY_PATH"),
-		C6PartnerName:                getEnvDefault("C6_PARTNER_SOFTWARE_NAME", "banking"),
-		C6PartnerVersion:             getEnvDefault("C6_PARTNER_SOFTWARE_VERSION", "0.1.0"),
-		WebhookPathSecret:            os.Getenv("C6_WEBHOOK_PATH_SECRET"),
-		C6ExpectedClientID:           os.Getenv("C6_EXPECTED_CLIENT_ID"),
-		C6ExpectedPartnerID:          os.Getenv("C6_EXPECTED_PARTNER_ID"),
-		InfinitePayBaseURL:           getEnvDefault("INFINITEPAY_BASE_URL", "https://api.checkout.infinitepay.io"),
-		InfinitePayHandle:            os.Getenv("INFINITEPAY_HANDLE"),
-		InfinitePayWebhookURL:        os.Getenv("INFINITEPAY_WEBHOOK_URL"),
-		InfinitePayWebhookPathSecret: os.Getenv("INFINITEPAY_WEBHOOK_PATH_SECRET"),
-		InfinitePayPlanMonthlyURL:    os.Getenv("INFINITEPAY_PLAN_MONTHLY_URL"),
-		CronChargeInterval:           getEnvDefault("CRON_CHARGE_INTERVAL", "@hourly"),
-		LogLevel:                     getEnvDefault("LOG_LEVEL", "info"),
-		LogHTTPBody:                  getEnvDefault("LOG_HTTP_BODY", "false") == "true",
-		APIKeys:                      parseAPIKeys(os.Getenv("API_KEYS")),
-		MaxRequestBodyBytes:          parseBytes(getEnvDefault("MAX_REQUEST_BODY_BYTES", "1048576")),
+		HTTPAddr:                   getEnvDefault("HTTP_ADDR", ":8080"),
+		DatabaseURL:                os.Getenv("DATABASE_URL"),
+		C6Env:                      getEnvDefault("C6_ENV", "sandbox"),
+		C6ClientID:                 os.Getenv("C6_CLIENT_ID"),
+		C6ClientSecret:             os.Getenv("C6_CLIENT_SECRET"),
+		C6MTLSCertPath:             os.Getenv("C6_MTLS_CERT_PATH"),
+		C6MTLSKeyPath:              os.Getenv("C6_MTLS_KEY_PATH"),
+		C6PartnerName:              getEnvDefault("C6_PARTNER_SOFTWARE_NAME", "banking"),
+		C6PartnerVersion:           getEnvDefault("C6_PARTNER_SOFTWARE_VERSION", "0.1.0"),
+		C6WebhookURLToken:          os.Getenv("C6_WEBHOOK_URL_TOKEN"),
+		C6ExpectedClientID:         os.Getenv("C6_EXPECTED_CLIENT_ID"),
+		C6ExpectedPartnerID:        os.Getenv("C6_EXPECTED_PARTNER_ID"),
+		InfinitePayBaseURL:         getEnvDefault("INFINITEPAY_BASE_URL", "https://api.checkout.infinitepay.io"),
+		InfinitePayHandle:          os.Getenv("INFINITEPAY_HANDLE"),
+		InfinitePayWebhookURL:      os.Getenv("INFINITEPAY_WEBHOOK_URL"),
+		InfinitePayWebhookURLToken: os.Getenv("INFINITEPAY_WEBHOOK_URL_TOKEN"),
+		InfinitePayPlanMonthlyURL:  os.Getenv("INFINITEPAY_PLAN_MONTHLY_URL"),
+		CronChargeInterval:         getEnvDefault("CRON_CHARGE_INTERVAL", "@hourly"),
+		LogLevel:                   getEnvDefault("LOG_LEVEL", "info"),
+		LogHTTPBody:                getEnvDefault("LOG_HTTP_BODY", "false") == "true",
+		APIKeys:                    parseAPIKeys(os.Getenv("API_KEYS")),
+		MaxRequestBodyBytes:        parseBytes(getEnvDefault("MAX_REQUEST_BODY_BYTES", "1048576")),
 	}
 
 	required := map[string]string{
-		"DATABASE_URL":           cfg.DatabaseURL,
-		"C6_CLIENT_ID":           cfg.C6ClientID,
-		"C6_CLIENT_SECRET":       cfg.C6ClientSecret,
-		"C6_MTLS_CERT_PATH":      cfg.C6MTLSCertPath,
-		"C6_MTLS_KEY_PATH":       cfg.C6MTLSKeyPath,
-		"C6_WEBHOOK_PATH_SECRET": cfg.WebhookPathSecret,
+		"DATABASE_URL":         cfg.DatabaseURL,
+		"C6_CLIENT_ID":         cfg.C6ClientID,
+		"C6_CLIENT_SECRET":     cfg.C6ClientSecret,
+		"C6_MTLS_CERT_PATH":    cfg.C6MTLSCertPath,
+		"C6_MTLS_KEY_PATH":     cfg.C6MTLSKeyPath,
+		"C6_WEBHOOK_URL_TOKEN": cfg.C6WebhookURLToken,
 	}
 	for name, val := range required {
 		if val == "" {
@@ -91,11 +91,38 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// The InfiniteTag is written with a leading '$' everywhere in InfinitePay's
+	// own UI, so it arrives that way from whoever fills the .env. The API wants
+	// it without. Normalising here beats rejecting: there is exactly one
+	// correct interpretation, and failing over a '$' would be pedantry.
+	cfg.InfinitePayHandle = strings.TrimPrefix(strings.TrimSpace(cfg.InfinitePayHandle), "$")
+
+	if err := validateInfinitePayBaseURL(cfg); err != nil {
+		return nil, err
+	}
 	if err := validateInfinitePayWebhook(cfg); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// validateInfinitePayBaseURL rejects a base URL that already carries the
+// endpoint path.
+//
+// The client builds requests as baseURL + path, and the checkout adapter
+// passes "/links". So a base of ".../links" silently produces ".../links/links"
+// — a 404 that only shows up when someone tries to pay. The endpoint path
+// belongs to the code; this setting is the host.
+func validateInfinitePayBaseURL(cfg *Config) error {
+	trimmed := strings.TrimRight(cfg.InfinitePayBaseURL, "/")
+	if strings.HasSuffix(trimmed, "/links") {
+		return fmt.Errorf(
+			"INFINITEPAY_BASE_URL must not include the endpoint path: use %q, not %q "+
+				"(the /links path is appended by the code)",
+			strings.TrimSuffix(trimmed, "/links"), cfg.InfinitePayBaseURL)
+	}
+	return nil
 }
 
 // validateInfinitePayWebhook refuses a webhook URL that does not end with the
@@ -112,18 +139,18 @@ func Load() (*Config, error) {
 // to catch it.
 func validateInfinitePayWebhook(cfg *Config) error {
 	// InfinitePay is optional — skip when the integration is not configured.
-	if cfg.InfinitePayWebhookURL == "" && cfg.InfinitePayWebhookPathSecret == "" {
+	if cfg.InfinitePayWebhookURL == "" && cfg.InfinitePayWebhookURLToken == "" {
 		return nil
 	}
-	if cfg.InfinitePayWebhookURL == "" || cfg.InfinitePayWebhookPathSecret == "" {
+	if cfg.InfinitePayWebhookURL == "" || cfg.InfinitePayWebhookURLToken == "" {
 		return fmt.Errorf(
-			"INFINITEPAY_WEBHOOK_URL and INFINITEPAY_WEBHOOK_PATH_SECRET must be set together")
+			"INFINITEPAY_WEBHOOK_URL and INFINITEPAY_WEBHOOK_URL_TOKEN must be set together")
 	}
-	if !strings.HasSuffix(strings.TrimRight(cfg.InfinitePayWebhookURL, "/"), "/"+cfg.InfinitePayWebhookPathSecret) {
+	if !strings.HasSuffix(strings.TrimRight(cfg.InfinitePayWebhookURL, "/"), "/"+cfg.InfinitePayWebhookURLToken) {
 		return fmt.Errorf(
-			"INFINITEPAY_WEBHOOK_URL must end with /%s (the value of INFINITEPAY_WEBHOOK_PATH_SECRET); "+
+			"INFINITEPAY_WEBHOOK_URL must end with /%s (the value of INFINITEPAY_WEBHOOK_URL_TOKEN); "+
 				"otherwise InfinitePay posts payment notifications to a route this service does not serve",
-			cfg.InfinitePayWebhookPathSecret)
+			cfg.InfinitePayWebhookURLToken)
 	}
 	return nil
 }

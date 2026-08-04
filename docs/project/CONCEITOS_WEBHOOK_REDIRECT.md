@@ -5,7 +5,7 @@ Esclarecimento de conceitos levantado durante o planejamento do checkout Infinit
 
 ## Webhook (`webhook_url`)
 
-É uma URL **do banking** (`/webhooks/infinitepay/{pathSecret}`) que a InfinitePay chama
+É uma URL **do banking** (`/webhooks/infinitepay/{urlToken}`) que a InfinitePay chama
 (server-to-server) quando o pagamento é aprovado. É o mecanismo que evita polling: o banking fica
 sabendo do pagamento de forma assíncrona e atualiza o status no banco sozinho.
 

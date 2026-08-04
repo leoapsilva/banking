@@ -6,7 +6,7 @@
 
 ## O que é, em uma frase
 
-`INFINITEPAY_WEBHOOK_PATH_SECRET` é um **token que você inventa** e que vira o
+`INFINITEPAY_WEBHOOK_URL_TOKEN` é um **token que você inventa** e que vira o
 último pedaço da rota que o serviço registra; `INFINITEPAY_WEBHOOK_URL` é essa
 mesma rota escrita como endereço público, que informamos à InfinitePay a cada
 cobrança criada.
@@ -51,7 +51,7 @@ deploy**: uma vez em uso, o valor não é facilmente trocável (ver §Rotação)
 No `banking/.env` (o da raiz, que alimenta o processo — não o `docker/.env`):
 
 ```bash
-INFINITEPAY_WEBHOOK_PATH_SECRET=<token gerado no passo 1>
+INFINITEPAY_WEBHOOK_URL_TOKEN=<token gerado no passo 1>
 INFINITEPAY_WEBHOOK_URL=https://seu-dominio.com.br/webhooks/infinitepay/<mesmo token>
 ```
 
@@ -70,14 +70,22 @@ O proxy do host precisa levar apenas o webhook para dentro do container:
 Nada além disso deve ser encaminhado. O resto da API é acessível só pela rede
 `cores-shared`.
 
-### 4. Preencher o handle da InfinitePay — **você**
+### 4. Preencher handle e base URL — **você**
 
 ```bash
-INFINITEPAY_HANDLE=<sua InfiniteTag, sem o $>
+# InfiniteTag da conta que recebe. Pode escrever com ou sem o '$' —
+# o código remove o prefixo.
+INFINITEPAY_HANDLE=cores-app-br
+
+# Apenas o host. NÃO inclua /links: esse caminho é acrescentado pelo código
+# (o client monta baseURL + "/links"), então uma base terminada em /links
+# geraria /links/links. Pode deixar vazio — este é o valor padrão.
+INFINITEPAY_BASE_URL=https://api.checkout.infinitepay.io
 ```
 
-É a credencial que identifica a conta que recebe. `INFINITEPAY_BASE_URL` pode
-ficar vazia (o código usa `https://api.checkout.infinitepay.io` por padrão).
+O endpoint efetivo de criação de cobrança é `POST https://api.checkout.infinitepay.io/links`,
+mas a variável guarda **só a parte antes de `/links`**. O startup recusa uma
+base que já inclua o caminho.
 
 ### 5. Subir e conferir — **você**
 
@@ -117,16 +125,25 @@ Criar um checkout, pagar em sandbox e confirmar que o status vira `PAID`. É o
 | Documentação das variáveis | `.env.example` |
 | Deploy falha se a porta for publicada em `0.0.0.0` | `.github/workflows/deploy.yml` |
 
-## O que ainda não está feito — **eu, quando você decidir**
+Validações de configuração que falham o startup, todas com mensagem dizendo o
+que corrigir:
 
-- **Renomear a variável.** `PATH_SECRET` é ambíguo: no mesmo `.env`, `_PATH`
-  significa caminho de arquivo (`C6_MTLS_CERT_PATH`), e `SECRET` sugere chave
-  criptográfica, que não é. `INFINITEPAY_WEBHOOK_URL_TOKEN` descreveria melhor.
-  Vale para `C6_WEBHOOK_PATH_SECRET` também. Barato agora, caro depois de
-  estar em produção.
-- **Confirmar a `INFINITEPAY_BASE_URL`.** O valor está no nosso código, mas não
-  encontrei onde a InfinitePay o documenta — a página de desenvolvedores não
-  publica referência de API. Um `POST /links` em sandbox confirma.
+| Erro | Por que é grave |
+|---|---|
+| `WEBHOOK_URL` não termina com o token | InfinitePay postaria numa rota inexistente; o pagamento entra e a assinatura nunca ativa |
+| Só um dos dois preenchido | mesma consequência |
+| `BASE_URL` terminando em `/links` | viraria `/links/links` — 404 na criação da cobrança |
+| `API_KEYS` vazio (checado no deploy) | serviço subiria com todas as rotas anônimas |
+
+## O que ainda não está feito
+
+- **Ownership por API key.** `httpserver.Caller` já leva a identidade do
+  chamador no contexto, mas nenhum handler a usa: quem tiver chave válida
+  ainda cancela qualquer assinatura pelo UUID.
+- **Backup do banco** ([#8](https://github.com/leoapsilva/banking/issues/8)) e
+  **configuração do golangci-lint** ([#9](https://github.com/leoapsilva/banking/issues/9)).
+- **Nada foi testado contra a InfinitePay real** — só build, vet e testes
+  unitários. O passo 7 abaixo é o que prova a cadeia.
 
 ---
 
@@ -144,13 +161,21 @@ registrada.
 Vale lembrar que vazamento do token, isoladamente, não permite ativar
 assinatura de graça: a validação de valor barra o evento forjado.
 
-## Nota sobre o nome
+## Nota sobre o nome (renomeado em ago/2026)
 
-`INFINITEPAY_WEBHOOK_PATH_SECRET` descreve mal o que a variável é:
+A variável se chamava `INFINITEPAY_WEBHOOK_PATH_SECRET` — e o nome era a
+origem de boa parte da confusão:
 
-| O que o nome sugere | O que de fato é |
+| O que o nome antigo sugeria | O que de fato é |
 |---|---|
-| caminho para um arquivo de segredo | um segmento da URL |
-| chave criptográfica (assinatura/HMAC) | token de obscuridade, trafega em claro |
+| caminho para um arquivo de segredo (`_PATH`, como em `C6_MTLS_CERT_PATH`) | um segmento da URL |
+| chave criptográfica, de assinatura (`_SECRET`) | token de obscuridade, trafega em claro |
 | algo obtido do provedor | valor que você mesmo gera |
 | descartável, por ser aleatório | durável — a InfinitePay já guardou o valor |
+
+`_URL_TOKEN` diz as duas coisas que importam: é um **token**, e ele vive na
+**URL**. O par do C6 foi renomeado junto (`C6_WEBHOOK_PATH_SECRET` →
+`C6_WEBHOOK_URL_TOKEN`) para não deixar o mesmo termo com dois sentidos.
+
+⚠️ **Ao atualizar a VPS**, renomeie as chaves no `.env` — os valores em si não
+mudam. Como o `.env` de produção não passa pelo CI, essa edição é manual.
