@@ -80,6 +80,32 @@ jobs:
             cd docker
             docker-compose build
 
+            echo "▶ Garantindo diretório de backups..."
+            mkdir -p backups
+            docker run --rm -v "\$(pwd)/backups:/backups" alpine chmod 777 /backups
+
+            # Backup ANTES de subir a nova versão: as migrations são aplicadas
+            # pelo binário no startup (cmd/api/main.go via postgres.RunMigrations),
+            # então uma vez que o container novo sobe, o schema já mudou. Este é
+            # o último instante em que o estado anterior ainda existe.
+            #
+            # "docker-compose build" reconstrói as imagens, mas não recria
+            # containers já em execução — o container postgres que roda agora
+            # é da imagem ANTERIOR a este deploy. Se uma mudança futura tocar
+            # docker/postgres/ (novo script, nova dependência), esse container
+            # antigo não terá a mudança até o "up -d" mais abaixo recriá-lo.
+            # /backup.sh não existindo ali não pode derrubar o deploy inteiro —
+            # por isso a tolerância a falha aqui, em vez de deixar o "set -e"
+            # do topo do script propagar.
+            echo "▶ Criando backup (se já houver banco no ar)..."
+            if docker-compose ps postgres 2>/dev/null | grep -q "Up"; then
+              if ! docker-compose exec -T postgres /backup.sh < /dev/null; then
+                echo "⚠ Backup falhou (container ainda roda a imagem anterior a este deploy?). Deploy continua sem backup pré-migração."
+              fi
+            else
+              echo "  postgres ainda não está no ar — primeiro deploy, sem backup a fazer"
+            fi
+
             echo "▶ Iniciando services..."
             docker-compose up -d
 
@@ -96,6 +122,16 @@ jobs:
             # As migrations são aplicadas pelo próprio processo no startup
             # (postgres.RunMigrations, com os .sql embutidos no binário), então
             # não há passo de migration aqui — subir o container já migra.
+
+            echo "▶ Enviando backup para o destino remoto..."
+            LATEST_BACKUP=\$(ls -t ~/banking/docker/backups/*.sql.gz 2>/dev/null | head -1)
+            if [ -n "\$LATEST_BACKUP" ] && command -v rclone &>/dev/null && rclone listremotes 2>/dev/null | grep -q '^gdrive:'; then
+              rclone copy "\$LATEST_BACKUP" gdrive:banking-backups/ --log-level INFO
+              echo "✓ Backup enviado: \$(basename \$LATEST_BACKUP)"
+              rclone delete gdrive:banking-backups/ --min-age 30d --log-level INFO || true
+            else
+              echo "⚠ rclone não configurado — backup apenas local (retenção de 7 arquivos)"
+            fi
 
             echo "▶ Verificando saúde do banking..."
             OK=0
