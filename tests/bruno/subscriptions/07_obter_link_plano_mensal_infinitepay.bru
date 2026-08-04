@@ -1,0 +1,20 @@
+meta {
+  name: 07 Obter link do plano mensal InfinitePay
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{base_url}}/v1/subscriptions/infinitepay/plans/monthly
+  auth: none
+}
+
+docs {
+  Se retornar 503, a env var INFINITEPAY_PLAN_MONTHLY_URL nao esta configurada no banking.
+  Nesse caso, verifique .env e reinicie o servico com o link do plano mensal preenchido.
+}
+
+assert {
+  res.status: eq 200
+  res.body.url: isDefined
+}

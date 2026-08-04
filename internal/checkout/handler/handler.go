@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/upwifi/banking/internal/checkout/domain"
 	"github.com/upwifi/banking/internal/checkout/service"
@@ -26,12 +27,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 }
 
 type addressPayload struct {
-	Street     string `json:"street"`
-	Number     string `json:"number"`
-	Complement string `json:"complement"`
-	City       string `json:"city"`
-	State      string `json:"state"`
-	ZipCode    string `json:"zip_code"`
+	Street       string `json:"street"`
+	Number       string `json:"number"`
+	Complement   string `json:"complement"`
+	Neighborhood string `json:"neighborhood"`
+	City         string `json:"city"`
+	State        string `json:"state"`
+	ZipCode      string `json:"zip_code"`
 }
 
 type payerPayload struct {
@@ -103,7 +105,8 @@ func (p *payerPayload) toDomain() *domain.Payer {
 	if p.Address != nil {
 		payer.Address = &domain.Address{
 			Street: p.Address.Street, Number: p.Address.Number, Complement: p.Address.Complement,
-			City: p.Address.City, State: p.Address.State, ZipCode: p.Address.ZipCode,
+			Neighborhood: p.Address.Neighborhood,
+			City:         p.Address.City, State: p.Address.State, ZipCode: p.Address.ZipCode,
 		}
 	}
 	return payer
@@ -143,11 +146,17 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 type checkoutDetailsResponse struct {
-	ID             string  `json:"id"`
-	Status         string  `json:"status"`
-	AmountCents    int64   `json:"amount_cents"`
-	Currency       string  `json:"currency"`
-	SavedCardToken *string `json:"saved_card_token,omitempty"`
+	ID              string  `json:"id"`
+	Status          string  `json:"status"`
+	AmountCents     int64   `json:"amount_cents"`
+	Currency        string  `json:"currency"`
+	SavedCardToken  *string `json:"saved_card_token,omitempty"`
+	PaidAmountCents *int64  `json:"paid_amount_cents,omitempty"`
+	CaptureMethod   *string `json:"capture_method,omitempty"`
+	Installments    *int    `json:"installments,omitempty"`
+	ReceiptURL      *string `json:"receipt_url,omitempty"`
+	TransactionID   *string `json:"transaction_id,omitempty"`
+	PaidAt          *string `json:"paid_at,omitempty"` // RFC3339
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -163,13 +172,27 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, checkoutDetailsResponse{
+
+	resp := checkoutDetailsResponse{
 		ID:             details.ProviderCheckoutID,
 		Status:         string(details.Status),
 		AmountCents:    details.Amount.AmountCents,
 		Currency:       details.Amount.Currency,
 		SavedCardToken: details.SavedCardToken,
-	})
+		CaptureMethod:  details.CaptureMethod,
+		Installments:   details.Installments,
+		ReceiptURL:     details.ReceiptURL,
+		TransactionID:  details.TransactionID,
+	}
+	if details.PaidAmount != nil {
+		v := details.PaidAmount.AmountCents
+		resp.PaidAmountCents = &v
+	}
+	if details.PaidAt != nil {
+		s := details.PaidAt.Format(time.RFC3339)
+		resp.PaidAt = &s
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {

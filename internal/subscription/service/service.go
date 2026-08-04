@@ -157,11 +157,69 @@ func (s *Service) CreateAnnualInstallment(ctx context.Context, req CreateAnnualI
 	return result, subID, nil
 }
 
+// CreateAnnualCheckoutRequest creates an annual subscription via a hosted
+// checkout link (InfinitePay model). No installments or card parameters are
+// sent — the buyer decides how to pay on the InfinitePay-hosted page.
+type CreateAnnualCheckoutRequest struct {
+	BaaS          checkoutdomain.BaaS
+	CustomerName  string
+	CustomerTaxID string
+	CustomerEmail string
+	Amount        checkoutdomain.Money
+	RedirectURL   string
+}
+
+// CreateAnnualCheckout creates an annual subscription backed by a single
+// hosted checkout link (e.g. InfinitePay). Unlike CreateAnnualInstallment,
+// no card or installments are configured — the buyer selects the payment
+// method on the provider's page.
+func (s *Service) CreateAnnualCheckout(ctx context.Context, req CreateAnnualCheckoutRequest) (checkoutdomain.CheckoutResult, uuid.UUID, error) {
+	sub := domain.Subscription{
+		BaaS:          req.BaaS,
+		CustomerTaxID: req.CustomerTaxID,
+		CustomerName:  req.CustomerName,
+		CustomerEmail: req.CustomerEmail,
+		Amount:        req.Amount,
+		Frequency:     domain.FrequencyAnnual,
+		Status:        domain.StatusPendingFirstPayment,
+	}
+	subID, err := s.repo.Create(ctx, sub)
+	if err != nil {
+		return checkoutdomain.CheckoutResult{}, uuid.Nil, fmt.Errorf("subscription: persist: %w", err)
+	}
+
+	result, err := s.checkoutSvc.CreateCheckout(ctx, checkoutdomain.CreateCheckoutRequest{
+		BaaS:                req.BaaS,
+		ExternalReferenceID: idgen.ExternalReferenceID(subID.String(), "annual"),
+		Amount:              req.Amount,
+		Description:         "Assinatura anual",
+		Payer: &checkoutdomain.Payer{
+			Name: req.CustomerName, TaxID: req.CustomerTaxID, Email: req.CustomerEmail,
+		},
+		// No Card — buyer chooses payment method (Pix, card up to 12x) on the hosted page.
+		RedirectURL: req.RedirectURL,
+	})
+	if err != nil {
+		return checkoutdomain.CheckoutResult{}, uuid.Nil, fmt.Errorf("subscription: create annual checkout: %w", err)
+	}
+
+	checkoutRow, err := s.checkoutRepo.GetByProviderID(ctx, req.BaaS, result.ProviderCheckoutID)
+	if err == nil {
+		_ = s.repo.SetInitialCheckout(ctx, subID, checkoutRow.ID)
+	}
+
+	return result, subID, nil
+}
+
 // HandleCheckoutEvent implements webhook.CheckoutEventSink. It reacts to
 // the initial checkout reaching a terminal state: PAID activates (monthly)
 // or completes (annual) the subscription; DECLINED/EXPIRED/ERROR cancel it
 // since there is no recurring relationship to keep without a first
 // successful payment.
+//
+// It also persists the checkout status and any payment details carried in the
+// event (InfinitePay sends capture_method, installments, paid_amount, etc.
+// in its webhook payload; C6 carries them only in separate GET responses).
 func (s *Service) HandleCheckoutEvent(ctx context.Context, event webhookdomain.InboundEvent) error {
 	if event.ProviderCheckoutID == "" {
 		slog.Warn("subscription: checkout event without provider checkout id, ignoring")
@@ -173,6 +231,28 @@ func (s *Service) HandleCheckoutEvent(ctx context.Context, event webhookdomain.I
 		// Not every checkout belongs to a subscription (future: one-off
 		// checkouts). Not finding it here is not an error condition.
 		return nil
+	}
+
+	// Always persist the new status from the event into the checkouts table.
+	status := checkoutdomain.Status(event.Status)
+	if err := s.checkoutRepo.UpdateStatus(ctx, checkoutdomain.BaaS(event.BaaS), event.ProviderCheckoutID, status); err != nil {
+		slog.Error("subscription: update checkout status from event", "error", err, "provider_checkout_id", event.ProviderCheckoutID)
+	}
+
+	// Persist payment details when the provider includes them in the webhook
+	// (InfinitePay). For C6 these fields are nil; no-op in that case.
+	if event.PaidAmountCents != nil || event.CaptureMethod != nil || event.TransactionID != nil {
+		details := checkoutrepo.PaymentDetails{
+			CaptureMethod:   event.CaptureMethod,
+			Installments:    event.Installments,
+			PaidAmountCents: event.PaidAmountCents,
+			ReceiptURL:      event.ReceiptURL,
+			TransactionID:   event.TransactionID,
+			PaidAt:          event.PaidAt,
+		}
+		if err := s.checkoutRepo.UpdatePaymentDetails(ctx, checkoutRow.ID, details); err != nil {
+			slog.Error("subscription: update payment details from event", "error", err, "checkout_id", checkoutRow.ID)
+		}
 	}
 
 	sub, err := s.findSubscriptionByInitialCheckout(ctx, checkoutRow.ID)
@@ -190,10 +270,6 @@ func (s *Service) HandleCheckoutEvent(ctx context.Context, event webhookdomain.I
 }
 
 func (s *Service) findSubscriptionByInitialCheckout(ctx context.Context, checkoutID uuid.UUID) (*domain.Subscription, error) {
-	// Repository only exposes GetByID for subscriptions today; a dedicated
-	// lookup by initial_checkout_id would normally live in repository, but
-	// for fase 1 volume a direct query here keeps the surface small. If
-	// this feature grows, move this into repository.Repository.
 	return s.repo.FindByInitialCheckoutID(ctx, checkoutID)
 }
 

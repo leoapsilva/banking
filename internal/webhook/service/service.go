@@ -86,11 +86,16 @@ func (s *Service) ProcessInbound(ctx context.Context, baas string, rawBody []byt
 		return fmt.Errorf("webhook: parse inbound: %w", err)
 	}
 
-	if s.expected.ClientID != "" && event.ClientID != s.expected.ClientID {
-		return ErrUntrustedOrigin
-	}
-	if s.expected.PartnerID != "" && event.PartnerID != s.expected.PartnerID {
-		return ErrUntrustedOrigin
+	// Origin validation (client_id / partner_id) only applies to C6: other
+	// providers (e.g. InfinitePay) don't include these identifiers in their
+	// webhook payloads, so validating them would reject all legitimate events.
+	if baas == "c6" {
+		if s.expected.ClientID != "" && event.ClientID != s.expected.ClientID {
+			return ErrUntrustedOrigin
+		}
+		if s.expected.PartnerID != "" && event.PartnerID != s.expected.PartnerID {
+			return ErrUntrustedOrigin
+		}
 	}
 
 	result, err := s.repo.InsertEventIfNew(ctx, baas, event.ExternalID, string(event.Service), event.Status, event.EventDateTime, rawBody)

@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	checkoutfeature "github.com/upwifi/banking/internal/checkout"
 	"github.com/upwifi/banking/internal/checkout/domain"
 	"github.com/upwifi/banking/internal/checkout/repository"
 	"github.com/upwifi/banking/internal/platform/providerregistry"
-
-	checkoutfeature "github.com/upwifi/banking/internal/checkout"
 )
 
 const featureName = "checkout"
@@ -57,6 +57,9 @@ func (s *Service) CreateCheckout(ctx context.Context, req domain.CreateCheckoutR
 	if req.Payer != nil {
 		row.PayerTaxID = req.Payer.TaxID
 		row.PayerName = req.Payer.Name
+		row.PayerEmail = req.Payer.Email
+		row.PayerPhone = req.Payer.PhoneNumber
+		row.PayerAddress = req.Payer.Address
 	}
 	if _, err := s.repo.Create(ctx, row, result); err != nil {
 		return domain.CheckoutResult{}, fmt.Errorf("checkout: persist: %w", err)
@@ -65,31 +68,64 @@ func (s *Service) CreateCheckout(ctx context.Context, req domain.CreateCheckoutR
 	return result, nil
 }
 
-// GetCheckout fetches the latest checkout state from the provider and
-// reconciles our local status copy.
+// GetCheckout fetches the latest checkout state. For providers that support
+// a GET endpoint (e.g. C6), it calls the provider and reconciles the local
+// status. For providers that return ErrNotSupported from Get() (e.g.
+// InfinitePay — DB-first, webhook-driven), it reads the already-persisted
+// state from the repository without any outbound API call.
 func (s *Service) GetCheckout(ctx context.Context, baas domain.BaaS, providerCheckoutID string) (domain.CheckoutDetails, error) {
 	provider, err := s.resolveProvider(baas)
 	if err != nil {
 		return domain.CheckoutDetails{}, err
 	}
+
 	details, err := provider.Get(ctx, providerCheckoutID)
+	if errors.Is(err, checkoutfeature.ErrNotSupported) {
+		row, repoErr := s.repo.GetByProviderID(ctx, baas, providerCheckoutID)
+		if repoErr != nil {
+			return domain.CheckoutDetails{}, fmt.Errorf("checkout: get from repository: %w", repoErr)
+		}
+		return rowToCheckoutDetails(row), nil
+	}
 	if err != nil {
 		return domain.CheckoutDetails{}, fmt.Errorf("checkout: get via provider: %w", err)
 	}
+
 	if err := s.repo.UpdateStatus(ctx, baas, providerCheckoutID, details.Status); err != nil {
 		return domain.CheckoutDetails{}, fmt.Errorf("checkout: reconcile status: %w", err)
 	}
 	return details, nil
 }
 
+// rowToCheckoutDetails converts a repository row to the domain details shape,
+// used for DB-first providers (InfinitePay) where Get() is not available.
+func rowToCheckoutDetails(row repository.Checkout) domain.CheckoutDetails {
+	d := domain.CheckoutDetails{
+		ProviderCheckoutID: row.ProviderCheckoutID,
+		Status:             row.Status,
+		Amount:             row.Amount,
+		CaptureMethod:      row.CaptureMethod,
+		Installments:       row.Installments,
+		ReceiptURL:         row.ReceiptURL,
+		TransactionID:      row.TransactionID,
+		PaidAt:             row.PaidAt,
+	}
+	if row.PaidAmountCents != nil {
+		d.PaidAmount = &domain.Money{AmountCents: *row.PaidAmountCents, Currency: row.Amount.Currency}
+	}
+	return d
+}
+
 // CancelCheckout aborts a pending checkout or reverses a paid one when the
-// payment method allows it.
+// payment method allows it. For providers that don't support cancellation via
+// API (ErrNotSupported), the local status is still updated to CANCELLED so
+// the subscription cancel flow completes cleanly.
 func (s *Service) CancelCheckout(ctx context.Context, baas domain.BaaS, providerCheckoutID string) error {
 	provider, err := s.resolveProvider(baas)
 	if err != nil {
 		return err
 	}
-	if err := provider.Cancel(ctx, providerCheckoutID); err != nil {
+	if err := provider.Cancel(ctx, providerCheckoutID); err != nil && !errors.Is(err, checkoutfeature.ErrNotSupported) {
 		return fmt.Errorf("checkout: cancel via provider: %w", err)
 	}
 	return s.repo.UpdateStatus(ctx, baas, providerCheckoutID, domain.StatusCancelled)
