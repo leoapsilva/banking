@@ -9,7 +9,8 @@ import "time"
 type BaaS string
 
 const (
-	BaaSC6 BaaS = "c6"
+	BaaSC6          BaaS = "c6"
+	BaaSInfinitePay BaaS = "infinitepay"
 )
 
 // CardType is the unified card transaction type.
@@ -72,12 +73,13 @@ type Money struct {
 
 // Address is the payer's billing address.
 type Address struct {
-	Street     string
-	Number     string
-	Complement string
-	City       string
-	State      string
-	ZipCode    string
+	Street       string
+	Number       string
+	Complement   string
+	Neighborhood string // used by InfinitePay; ignored by C6
+	City         string
+	State        string
+	ZipCode      string
 }
 
 // Payer is the person/entity paying the checkout.
@@ -154,4 +156,12 @@ type CheckoutDetails struct {
 	Status             Status
 	Amount             Money
 	SavedCardToken     *string
+	// Payment confirmation fields — nil until the checkout is paid.
+	// Populated from DB (webhook-driven) for InfinitePay; from provider GET for C6.
+	PaidAmount    *Money
+	CaptureMethod *string
+	Installments  *int
+	ReceiptURL    *string
+	TransactionID *string
+	PaidAt        *time.Time
 }

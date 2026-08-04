@@ -30,6 +30,8 @@ import (
 	c6provider "github.com/upwifi/banking/internal/provider/c6"
 	c6auth "github.com/upwifi/banking/internal/provider/c6/auth"
 	c6client "github.com/upwifi/banking/internal/provider/c6/client"
+	infinitepayprovider "github.com/upwifi/banking/internal/provider/infinitepay"
+	infinitepayclient "github.com/upwifi/banking/internal/provider/infinitepay/client"
 	subscriptionhandler "github.com/upwifi/banking/internal/subscription/handler"
 	subscriptionrepo "github.com/upwifi/banking/internal/subscription/repository"
 	subscriptionservice "github.com/upwifi/banking/internal/subscription/service"
@@ -91,6 +93,15 @@ func run() error {
 	providerregistry.Register(registry, "pix", "c6", c6PixAdapter)
 	providerregistry.Register(registry, "paymentscheduling", "c6", c6PaymentSchedulingAdapter)
 
+	// --- InfinitePay provider wiring ---
+	infinitePayHTTPClient := &http.Client{Timeout: 30 * time.Second}
+	infinitePayClient := infinitepayclient.New(infinitePayHTTPClient, cfg.InfinitePayBaseURL)
+	infinitePayCheckoutAdapter := infinitepayprovider.NewCheckoutAdapter(infinitePayClient, cfg.InfinitePayHandle, cfg.InfinitePayWebhookURL)
+	infinitePayWebhookAdapter := infinitepayprovider.NewWebhookAdapter()
+
+	providerregistry.Register(registry, "checkout", "infinitepay", infinitePayCheckoutAdapter)
+	providerregistry.Register(registry, "webhook", "infinitepay", infinitePayWebhookAdapter)
+
 	// --- Feature wiring ---
 	checkoutRepository := checkoutrepo.New(pool)
 	checkoutSvc := checkoutservice.New(registry, checkoutRepository)
@@ -101,11 +112,11 @@ func run() error {
 		ClientID:  cfg.C6ExpectedClientID,
 		PartnerID: cfg.C6ExpectedPartnerID,
 	})
-	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.WebhookPathSecret)
+	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.WebhookPathSecret, cfg.InfinitePayWebhookPathSecret)
 
 	subscriptionRepository := subscriptionrepo.New(pool)
 	subscriptionSvc := subscriptionservice.New(subscriptionRepository, checkoutRepository, checkoutSvc)
-	subscriptionHandlerInst := subscriptionhandler.New(subscriptionSvc)
+	subscriptionHandlerInst := subscriptionhandler.New(subscriptionSvc, cfg.InfinitePayPlanMonthlyURL)
 
 	webhookSvc.SetCheckoutSink(subscriptionSvc)
 

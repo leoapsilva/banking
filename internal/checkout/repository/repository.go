@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -32,6 +33,16 @@ type Checkout struct {
 	CheckoutURL         string
 	PayerTaxID          string
 	PayerName           string
+	PayerEmail          string
+	PayerPhone          string
+	PayerAddress        *domain.Address
+	// Payment confirmation fields — nil until the checkout is paid.
+	CaptureMethod   *string
+	Installments    *int
+	PaidAmountCents *int64
+	ReceiptURL      *string
+	TransactionID   *string
+	PaidAt          *time.Time
 }
 
 func (r *Repository) Create(ctx context.Context, c Checkout, rawResponse any) (uuid.UUID, error) {
@@ -39,14 +50,23 @@ func (r *Repository) Create(ctx context.Context, c Checkout, rawResponse any) (u
 	if err != nil {
 		return uuid.Nil, err
 	}
+	var addrJSON []byte
+	if c.PayerAddress != nil {
+		addrJSON, err = json.Marshal(c.PayerAddress)
+		if err != nil {
+			return uuid.Nil, err
+		}
+	}
 	var id uuid.UUID
 	err = r.pool.QueryRow(ctx, `
 		INSERT INTO checkouts (baas, provider_checkout_id, external_reference_id, amount_cents,
-			currency, status, checkout_url, payer_tax_id, payer_name, raw_create_response)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			currency, status, checkout_url, payer_tax_id, payer_name, payer_email, payer_phone,
+			payer_address, raw_create_response)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		RETURNING id
 	`, c.BaaS, c.ProviderCheckoutID, c.ExternalReferenceID, c.Amount.AmountCents,
-		c.Amount.Currency, c.Status, c.CheckoutURL, c.PayerTaxID, c.PayerName, raw,
+		c.Amount.Currency, c.Status, c.CheckoutURL, c.PayerTaxID, c.PayerName,
+		nullStr(c.PayerEmail), nullStr(c.PayerPhone), nullBytes(addrJSON), raw,
 	).Scan(&id)
 	return id, err
 }
@@ -59,22 +79,79 @@ func (r *Repository) UpdateStatus(ctx context.Context, baas domain.BaaS, provide
 	return err
 }
 
+// PaymentDetails holds the confirmation data that arrives via webhook after payment.
+type PaymentDetails struct {
+	CaptureMethod   *string
+	Installments    *int
+	PaidAmountCents *int64
+	ReceiptURL      *string
+	TransactionID   *string
+	PaidAt          *time.Time
+}
+
+// UpdatePaymentDetails persists payment confirmation data for a checkout by
+// its internal UUID. Called from the webhook handler after InfinitePay notifies
+// us of a completed payment.
+func (r *Repository) UpdatePaymentDetails(ctx context.Context, id uuid.UUID, d PaymentDetails) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE checkouts SET
+			capture_method    = COALESCE($2, capture_method),
+			installments      = COALESCE($3, installments),
+			paid_amount_cents = COALESCE($4, paid_amount_cents),
+			receipt_url       = COALESCE($5, receipt_url),
+			transaction_id    = COALESCE($6, transaction_id),
+			paid_at           = COALESCE($7, paid_at),
+			updated_at        = now()
+		WHERE id = $1
+	`, id, d.CaptureMethod, d.Installments, d.PaidAmountCents, d.ReceiptURL, d.TransactionID, d.PaidAt)
+	return err
+}
+
 func (r *Repository) GetByProviderID(ctx context.Context, baas domain.BaaS, providerCheckoutID string) (Checkout, error) {
-	var c Checkout
-	err := r.pool.QueryRow(ctx, `
+	return r.scanCheckout(ctx, `
 		SELECT id, baas, provider_checkout_id, COALESCE(external_reference_id, ''),
 			amount_cents, currency, status, COALESCE(checkout_url, ''),
-			COALESCE(payer_tax_id, ''), COALESCE(payer_name, '')
+			COALESCE(payer_tax_id, ''), COALESCE(payer_name, ''),
+			COALESCE(payer_email, ''), COALESCE(payer_phone, ''), payer_address,
+			capture_method, installments, paid_amount_cents, receipt_url, transaction_id, paid_at
 		FROM checkouts WHERE baas = $1 AND provider_checkout_id = $2
-	`, baas, providerCheckoutID).Scan(
+	`, baas, providerCheckoutID)
+}
+
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Checkout, error) {
+	return r.scanCheckout(ctx, `
+		SELECT id, baas, provider_checkout_id, COALESCE(external_reference_id, ''),
+			amount_cents, currency, status, COALESCE(checkout_url, ''),
+			COALESCE(payer_tax_id, ''), COALESCE(payer_name, ''),
+			COALESCE(payer_email, ''), COALESCE(payer_phone, ''), payer_address,
+			capture_method, installments, paid_amount_cents, receipt_url, transaction_id, paid_at
+		FROM checkouts WHERE id = $1
+	`, id)
+}
+
+func (r *Repository) scanCheckout(ctx context.Context, query string, args ...any) (Checkout, error) {
+	var c Checkout
+	var addrJSON []byte
+	err := r.pool.QueryRow(ctx, query, args...).Scan(
 		&c.ID, &c.BaaS, &c.ProviderCheckoutID, &c.ExternalReferenceID,
 		&c.Amount.AmountCents, &c.Amount.Currency, &c.Status, &c.CheckoutURL,
-		&c.PayerTaxID, &c.PayerName,
+		&c.PayerTaxID, &c.PayerName, &c.PayerEmail, &c.PayerPhone, &addrJSON,
+		&c.CaptureMethod, &c.Installments, &c.PaidAmountCents,
+		&c.ReceiptURL, &c.TransactionID, &c.PaidAt,
 	)
 	if err == pgx.ErrNoRows {
 		return Checkout{}, ErrNotFound
 	}
-	return c, err
+	if err != nil {
+		return Checkout{}, err
+	}
+	if len(addrJSON) > 0 {
+		var addr domain.Address
+		if err := json.Unmarshal(addrJSON, &addr); err == nil {
+			c.PayerAddress = &addr
+		}
+	}
+	return c, nil
 }
 
 // CardToken is a saved card token captured from a successful save_card
@@ -98,24 +175,6 @@ func (r *Repository) SaveCardToken(ctx context.Context, t CardToken) (uuid.UUID,
 	return id, err
 }
 
-func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (Checkout, error) {
-	var c Checkout
-	err := r.pool.QueryRow(ctx, `
-		SELECT id, baas, provider_checkout_id, COALESCE(external_reference_id, ''),
-			amount_cents, currency, status, COALESCE(checkout_url, ''),
-			COALESCE(payer_tax_id, ''), COALESCE(payer_name, '')
-		FROM checkouts WHERE id = $1
-	`, id).Scan(
-		&c.ID, &c.BaaS, &c.ProviderCheckoutID, &c.ExternalReferenceID,
-		&c.Amount.AmountCents, &c.Amount.Currency, &c.Status, &c.CheckoutURL,
-		&c.PayerTaxID, &c.PayerName,
-	)
-	if err == pgx.ErrNoRows {
-		return Checkout{}, ErrNotFound
-	}
-	return c, err
-}
-
 // GetCardTokenValue returns the raw provider token value for a saved card,
 // used by the subscription cron worker to authorize recurring charges.
 func (r *Repository) GetCardTokenValue(ctx context.Context, id uuid.UUID) (string, error) {
@@ -132,3 +191,17 @@ var ErrNotFound = errNotFound{}
 type errNotFound struct{}
 
 func (errNotFound) Error() string { return "checkout: not found" }
+
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullBytes(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
+}

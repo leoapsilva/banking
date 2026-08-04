@@ -1,0 +1,29 @@
+meta {
+  name: 09 Consultar checkout InfinitePay apos webhook de pagamento
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{base_url}}/v1/checkouts/{{infinitepay_checkout_id}}?baas=infinitepay
+  auth: none
+}
+
+docs {
+  Para InfinitePay, GET e DB-first: o banking le do proprio banco (atualizado pelo
+  webhook do teste anterior). Nunca chama a API da InfinitePay.
+  Execute o teste 04 de webhooks antes deste para que o status seja PAID.
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: isDefined
+  res.body.status: eq PAID
+  res.body.amount_cents: isDefined
+  res.body.paid_amount_cents: isDefined
+  res.body.capture_method: isDefined
+  res.body.installments: isDefined
+  res.body.receipt_url: isDefined
+  res.body.transaction_id: isDefined
+  res.body.paid_at: isDefined
+}

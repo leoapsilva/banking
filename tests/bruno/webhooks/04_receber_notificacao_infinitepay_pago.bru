@@ -1,0 +1,41 @@
+meta {
+  name: 04 Receber notificacao de pagamento InfinitePay
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/webhooks/infinitepay/{{infinitepay_webhook_path_secret}}
+  body: json
+  auth: none
+}
+
+docs {
+  Simula o payload que a InfinitePay envia ao nosso webhook_url apos pagamento aprovado.
+  invoice_slug deve ser o checkout_id criado no teste 06 de subscriptions.
+  A InfinitePay so dispara este webhook em caso de pagamento aprovado (status sempre PAID).
+}
+
+body:json {
+  {
+    "invoice_slug": "{{infinitepay_checkout_id}}",
+    "amount": 150000,
+    "paid_amount": 153000,
+    "installments": 3,
+    "capture_method": "credit_card",
+    "transaction_nsu": "bruno-test-txn-0001",
+    "order_nsu": "bruno-test-order-0001",
+    "receipt_url": "https://comprovante.infinitepay.io/bruno-test-txn-0001",
+    "items": [
+      {
+        "quantity": 1,
+        "price": 150000,
+        "description": "Assinatura anual"
+      }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 200
+}

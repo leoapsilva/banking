@@ -1,0 +1,369 @@
+openapi: 3.0.3
+info:
+  title: Banking — Subscriptions API (InfinitePay)
+  description: >
+    Subconjunto do contrato HTTP exposto pelo banking para venda de assinaturas via InfinitePay:
+    - Plano anual: criação de checkout (link de pagamento único, comprador escolhe Pix ou cartão até 12x).
+    - Plano mensal: devolução do link de plano recorrente pré-configurado no InfinitePay app.
+    Não cobre cancelamento/autorização direta (não suportados pela InfinitePay via API).
+  version: "0.1.0"
+servers:
+  - url: https://{banking-host}
+    variables:
+      banking-host:
+        default: localhost:8080
+        description: Host do banking nesse ambiente (dev/staging/produção).
+
+security: []
+# Autenticação: esta versão do banking não implementa um middleware de
+# autenticação (ver internal/platform/httpserver/middleware.go — só há log
+# scrubbing de um eventual header Authorization, não enforcement). Confirme
+# com o time do banking como este deployment específico está protegido
+# (rede privada, mTLS de borda, API key futura) antes de ir para produção.
+
+paths:
+  /v1/subscriptions/annual:
+    post:
+      summary: Cria assinatura anual InfinitePay (checkout único)
+      description: >
+        Gera um link de pagamento hospedado pela InfinitePay para o valor total do plano anual.
+        Não recebe `installments` — o comprador decide na página (Pix grátis ou cartão até 12x).
+        Registra uma subscription no banking e retorna o checkout_id para consulta de status posterior.
+      operationId: createAnnualSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnualSubscriptionRequest'
+            example:
+              baas: infinitepay
+              customer_name: "Maria Souza"
+              customer_email: "maria@email.com"
+              amount_cents: 150000
+              currency: BRL
+              redirect_url: "https://seusite.com/assinatura/concluida"
+      responses:
+        '201':
+          description: Subscription criada e checkout gerado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSubscriptionResponse'
+              example:
+                subscription_id: "550e8400-e29b-41d4-a716-446655440000"
+                checkout_id: "abc123"
+                checkout_url: "https://checkout.infinitepay.com.br/abc123"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  /v1/subscriptions/infinitepay/plans/monthly:
+    get:
+      summary: Retorna o link do plano mensal InfinitePay
+      description: >
+        Devolve a URL do plano de assinatura mensal pré-criado no app InfinitePay (gerenciado por eles,
+        com cobranças automáticas e lembretes via WhatsApp). O banking apenas armazena e devolve este
+        link — nenhuma chamada à API da InfinitePay é feita neste endpoint.
+        Redirecione o comprador para a URL devolvida para que ele se inscreva no plano.
+      operationId: getMonthlyPlanLink
+      responses:
+        '200':
+          description: Link do plano mensal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanLinkResponse'
+              example:
+                url: "https://invoice.infinitepay.io/plans/seu-handle/CODIGO"
+        '503':
+          description: Plano mensal não configurado no banking (INFINITEPAY_PLAN_MONTHLY_URL vazia).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/checkouts:
+    post:
+      summary: Cria um checkout (link de pagamento) para o plano anual
+      operationId: createAnnualCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCheckoutRequest'
+            example:
+              baas: infinitepay
+              external_reference_id: "ASSIN-2026-PLANOANUAL-00042"
+              amount_cents: 150000
+              currency: BRL
+              description: "Plano Anual — App XPTO"
+              redirect_url: "https://seusite.com/assinatura/concluida"
+              payer:
+                name: "Maria Souza"
+                email: "maria@email.com"
+                phone_number: "11999998888"
+                address:
+                  zip_code: "12345678"
+                  street: "Rua das Flores"
+                  neighborhood: "Centro"
+                  number: "123"
+                  complement: "Apto 45"
+      responses:
+        '201':
+          description: Checkout criado. `url` é o link hospedado para redirecionar o comprador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCheckoutResponse'
+              example:
+                id: "abc123"
+                url: "https://invoice.infinitepay.io/leonardo-alves-us7/abc123"
+        '400':
+          description: Payload inválido (ex.: `baas` ausente, `items`/`amount_cents` inválidos).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Falha ao chamar o provedor (InfinitePay indisponível, payload rejeitado por eles).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/checkouts/{id}:
+    get:
+      summary: Consulta o status e os dados de pagamento de um checkout
+      description: >
+        Para `baas=infinitepay`, esta leitura é servida a partir do banco do banking (atualizado
+        de forma assíncrona pelo webhook da InfinitePay), nunca chama a InfinitePay diretamente.
+        Enquanto o webhook não chegou, o status retornado é `CREATED`/`IN_PROGRESS`, nunca um erro.
+      operationId: getCheckout
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: O `id` devolvido pela criação do checkout (slug da InfinitePay).
+        - name: baas
+          in: query
+          required: true
+          schema: { type: string, enum: [infinitepay, c6] }
+      responses:
+        '200':
+          description: Estado atual do checkout.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutDetailsResponse'
+              examples:
+                pago_via_pix:
+                  value:
+                    id: "abc123"
+                    status: PAID
+                    amount_cents: 150000
+                    currency: BRL
+                    paid_amount_cents: 150000
+                    capture_method: pix
+                    installments: 1
+                    receipt_url: "https://comprovante.infinitepay.io/abc123"
+                    transaction_id: "9f3e1c2a-7b1e-4e9a-8c3a-1f2e3d4c5b6a"
+                    paid_at: "2026-06-22T14:32:10Z"
+                pago_via_cartao_parcelado:
+                  value:
+                    id: "abc123"
+                    status: PAID
+                    amount_cents: 150000
+                    currency: BRL
+                    paid_amount_cents: 153000
+                    capture_method: credit_card
+                    installments: 3
+                    receipt_url: "https://comprovante.infinitepay.io/abc123"
+                    transaction_id: "9f3e1c2a-7b1e-4e9a-8c3a-1f2e3d4c5b6a"
+                    paid_at: "2026-06-22T14:32:10Z"
+                ainda_nao_pago:
+                  value:
+                    id: "abc123"
+                    status: CREATED
+                    amount_cents: 150000
+                    currency: BRL
+        '400':
+          description: Parâmetro `baas` ausente.
+        '502':
+          description: Erro inesperado ao resolver o provedor.
+
+components:
+  schemas:
+    Address:
+      type: object
+      description: Usado apenas para pré-preencher a página hospedada da InfinitePay; todos os campos são opcionais.
+      properties:
+        zip_code: { type: string, example: "12345678" }
+        street: { type: string, example: "Rua das Flores" }
+        neighborhood: { type: string, example: "Centro" }
+        number: { type: string, example: "123" }
+        complement: { type: string, example: "Apto 45" }
+
+    Payer:
+      type: object
+      description: >
+        Opcional. Pré-preenche a página hospedada — o comprador ainda confirma/edita esses dados
+        na própria InfinitePay. `tax_id` (CPF) não tem efeito para `baas=infinitepay` (é ignorado).
+      properties:
+        name: { type: string, example: "Maria Souza" }
+        email: { type: string, format: email, example: "maria@email.com" }
+        phone_number: { type: string, example: "11999998888" }
+        address: { $ref: '#/components/schemas/Address' }
+
+    CreateAnnualSubscriptionRequest:
+      type: object
+      required: [baas, customer_name, customer_email, amount_cents, currency, redirect_url]
+      properties:
+        baas:
+          type: string
+          enum: [infinitepay]
+        customer_name: { type: string, example: "Maria Souza" }
+        customer_email: { type: string, format: email }
+        customer_tax_id:
+          type: string
+          description: CPF — opcional para InfinitePay (ignorado pelo provider, guardado no banking).
+        amount_cents:
+          type: integer
+          format: int64
+          description: Valor total do plano anual em centavos.
+          example: 150000
+        currency: { type: string, example: BRL }
+        redirect_url:
+          type: string
+          format: uri
+          description: URL do seu site para onde o comprador volta após pagar. Sempre configure.
+          example: "https://seusite.com/assinatura/concluida"
+
+    CreateSubscriptionResponse:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+          format: uuid
+          description: ID da subscription no banking. Guarde para cancelamento futuro.
+        checkout_id:
+          type: string
+          description: Slug do checkout InfinitePay. Use em GET /v1/checkouts/{id} para consultar status.
+        checkout_url:
+          type: string
+          format: uri
+          description: Redirecione o comprador para esta URL.
+
+    PlanLinkResponse:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Link do plano mensal gerenciado pela InfinitePay. Redirecione o comprador.
+
+    CreateCheckoutRequest:
+      type: object
+      required: [baas, amount_cents, currency, description]
+      properties:
+        baas:
+          type: string
+          enum: [infinitepay]
+          description: Fixo "infinitepay" para este fluxo.
+        external_reference_id:
+          type: string
+          description: Identificador do pedido no seu sistema (ex. id da assinatura). Recomendado, não obrigatório.
+          example: "ASSIN-2026-PLANOANUAL-00042"
+        amount_cents:
+          type: integer
+          format: int64
+          description: Valor total do plano anual, em centavos.
+          example: 150000
+        currency:
+          type: string
+          example: BRL
+        description:
+          type: string
+          example: "Plano Anual — App XPTO"
+        redirect_url:
+          type: string
+          format: uri
+          description: >
+            URL do seu site para onde o navegador do comprador é levado após o pagamento.
+            Sem este campo, a InfinitePay redireciona automaticamente para a própria página de
+            comprovante após ~3s — não recomendado para este fluxo, sempre configure.
+          example: "https://seusite.com/assinatura/concluida"
+        payer:
+          $ref: '#/components/schemas/Payer'
+
+    CreateCheckoutResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Identificador do checkout (slug da InfinitePay). Use para consultar o status depois.
+          example: "abc123"
+        url:
+          type: string
+          format: uri
+          description: >
+            Link de pagamento hospedado pela InfinitePay. Redirecione o comprador para esta URL.
+            Na página hospedada, o comprador escolhe Pix (taxa zero), cartão de crédito (até 12x,
+            escolha dele), Apple Pay ou Google Pay.
+          example: "https://checkout.infinitepay.com.br/abc123"
+
+    CheckoutDetailsResponse:
+      type: object
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [CREATED, IN_PROGRESS, PAID, DECLINED, EXPIRED, CANCELLED, ERROR]
+        amount_cents: { type: integer, format: int64 }
+        currency: { type: string }
+        paid_amount_cents:
+          type: integer
+          format: int64
+          nullable: true
+          description: Valor efetivamente pago pelo comprador (pode diferir de amount_cents por juros de parcelamento). Nulo até o pagamento ser confirmado.
+        capture_method:
+          type: string
+          nullable: true
+          enum: [pix, credit_card, debit_card]
+          description: Forma de pagamento escolhida pelo comprador na página da InfinitePay. Nulo até a confirmação.
+        installments:
+          type: integer
+          nullable: true
+          description: Número de parcelas escolhidas pelo comprador (1 para Pix). Nulo até a confirmação.
+        receipt_url:
+          type: string
+          format: uri
+          nullable: true
+        transaction_id:
+          type: string
+          nullable: true
+          description: transaction_nsu da InfinitePay.
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+
+  responses:
+    BadRequest:
+      description: Payload inválido.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ProviderError:
+      description: Falha ao chamar a InfinitePay.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

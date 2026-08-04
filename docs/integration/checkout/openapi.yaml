@@ -1,0 +1,678 @@
+openapi: 3.0.3
+info:
+  title: Banking — Checkout & Subscriptions API
+  description: >
+    API completa do serviço banking para criação de links de pagamento (checkouts),
+    gestão de assinaturas e consulta de status de pagamento.
+
+    ## Provedores suportados
+
+    | `baas` | Tipo de checkout | Parcelamento | Recorrência |
+    |---|---|---|---|
+    | `c6` | Transparente (card tokenizado) | Configurável pelo merchant (2-12x) | Sim (SaveCard + Authorize) |
+    | `infinitepay` | Hosted page (link de pagamento) | Comprador escolhe na página (Pix grátis ou cartão até 12x) | Via link de plano pré-criado |
+
+    ## Autenticação
+
+    Esta versão não implementa autenticação HTTP. O deployment deve ser protegido
+    em camada de rede (VPC privada, mTLS de borda, ou API key futura).
+    Nunca exponha este serviço diretamente na internet sem proteção de rede.
+
+    ## Fontes de verdade sobre status
+
+    - **C6**: `GET /v1/checkouts/{id}` faz uma chamada em tempo real à API C6 e
+      reconcilia o status local. Polling é a forma correta de acompanhar o status.
+    - **InfinitePay**: `GET /v1/checkouts/{id}` lê o banco local — não chama a
+      InfinitePay. O status é atualizado de forma assíncrona pelo webhook que a
+      InfinitePay envia ao banking quando o pagamento é aprovado.
+  version: "0.1.0"
+
+servers:
+  - url: https://{banking-host}
+    variables:
+      banking-host:
+        default: localhost:8080
+        description: Host do banking neste ambiente.
+
+security: []
+
+tags:
+  - name: Checkouts
+    description: Criação e consulta de links/checkouts de pagamento
+  - name: Subscriptions
+    description: Assinaturas mensais e anuais
+  - name: Admin
+    description: Endpoints administrativos (proteger na camada de rede)
+
+paths:
+
+  # ── Checkouts ────────────────────────────────────────────────────────────────
+
+  /v1/checkouts:
+    post:
+      tags: [Checkouts]
+      summary: Cria um checkout (link ou formulário de pagamento)
+      description: >
+        Para `baas=infinitepay`: cria um link de pagamento hospedado pela InfinitePay.
+        O comprador escolhe Pix (grátis) ou cartão (até 12x) na página deles.
+        Use `/v1/subscriptions/annual` para assinaturas anuais com subscription_id.
+
+        Para `baas=c6`: cria um checkout transparente com configuração de cartão
+        definida pelo merchant (tipo, parcelas, salvar cartão, etc.).
+      operationId: createCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCheckoutRequest'
+            examples:
+              infinitepay_simples:
+                summary: InfinitePay — link de pagamento mínimo
+                value:
+                  baas: infinitepay
+                  amount_cents: 15000
+                  currency: BRL
+                  description: "Produto X"
+                  redirect_url: "https://seusite.com/pagamento-concluido"
+              infinitepay_com_comprador:
+                summary: InfinitePay — com dados do comprador (pré-preenche a página)
+                value:
+                  baas: infinitepay
+                  external_reference_id: "PEDIDO-0042"
+                  amount_cents: 15000
+                  currency: BRL
+                  description: "Produto X"
+                  redirect_url: "https://seusite.com/pagamento-concluido"
+                  payer:
+                    name: "Maria Souza"
+                    email: "maria@email.com"
+                    phone_number: "11999998888"
+                    address:
+                      zip_code: "01310100"
+                      street: "Av. Paulista"
+                      neighborhood: "Bela Vista"
+                      number: "1000"
+                      complement: "Apto 42"
+              c6_credito:
+                summary: C6 — cartão de crédito 1x
+                value:
+                  baas: c6
+                  external_reference_id: "PEDIDO-0043"
+                  amount_cents: 15000
+                  currency: BRL
+                  description: "Produto X"
+                  redirect_url: "https://seusite.com/pagamento-concluido"
+                  payer:
+                    name: "João Silva"
+                    tax_id: "12345678909"
+                    email: "joao@email.com"
+                  card:
+                    type: CREDIT
+                    installments: 1
+                    capture: true
+                    authenticate: NOT_REQUIRED
+                    card_info:
+                      card_hash: "hash-capturado-pelo-frontend"
+      responses:
+        '201':
+          description: Checkout criado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCheckoutResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  /v1/checkouts/{id}:
+    get:
+      tags: [Checkouts]
+      summary: Consulta status e detalhes de pagamento de um checkout
+      description: >
+        O campo `id` é o `ProviderCheckoutID` retornado na criação:
+
+        - **InfinitePay**: é o `slug` do link. Leitura DB-first (sem chamada à InfinitePay);
+          o status é atualizado quando o webhook de pagamento chega ao banking.
+          Faça polling curto (ex.: 3 tentativas a cada 2s) se o comprador acabou
+          de voltar pelo `redirect_url` e o webhook pode não ter chegado ainda.
+
+        - **C6**: é o `id` do checkout. Cada chamada faz uma requisição em tempo
+          real à API C6 e reconcilia o status local.
+      operationId: getCheckout
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: baas
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [infinitepay, c6]
+      responses:
+        '200':
+          description: Estado atual do checkout.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutDetailsResponse'
+              examples:
+                paid_pix:
+                  summary: Pago via Pix (InfinitePay)
+                  value:
+                    id: "abc123slug"
+                    status: PAID
+                    amount_cents: 15000
+                    currency: BRL
+                    paid_amount_cents: 15000
+                    capture_method: pix
+                    installments: 1
+                    receipt_url: "https://comprovante.infinitepay.io/abc123slug"
+                    transaction_id: "txn-uuid-0001"
+                    paid_at: "2026-07-06T14:32:10Z"
+                paid_card:
+                  summary: Pago em cartão parcelado (InfinitePay)
+                  value:
+                    id: "abc123slug"
+                    status: PAID
+                    amount_cents: 15000
+                    currency: BRL
+                    paid_amount_cents: 15600
+                    capture_method: credit_card
+                    installments: 3
+                    receipt_url: "https://comprovante.infinitepay.io/abc123slug"
+                    transaction_id: "txn-uuid-0001"
+                    paid_at: "2026-07-06T14:32:10Z"
+                pending:
+                  summary: Aguardando pagamento
+                  value:
+                    id: "abc123slug"
+                    status: CREATED
+                    amount_cents: 15000
+                    currency: BRL
+        '400':
+          description: Parâmetro `baas` ausente.
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+    put:
+      tags: [Checkouts]
+      summary: Cancela um checkout
+      description: >
+        Para `baas=c6`: chama a API C6 para cancelar o checkout.
+
+        Para `baas=infinitepay`: a InfinitePay não oferece cancelamento via API.
+        O status local é marcado como CANCELLED sem chamada externa. O link hospedado
+        continuará acessível até expirar naturalmente.
+      operationId: cancelCheckout
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: baas
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [infinitepay, c6]
+      responses:
+        '204':
+          description: Checkout cancelado.
+        '400':
+          description: Parâmetro `baas` ausente.
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  # ── Subscriptions ────────────────────────────────────────────────────────────
+
+  /v1/subscriptions/annual:
+    post:
+      tags: [Subscriptions]
+      summary: Cria assinatura anual via link de pagamento (InfinitePay)
+      description: >
+        Cria um link de pagamento hospedado pela InfinitePay para o valor total do
+        plano anual. O comprador escolhe Pix ou cartão (até 12x) na página deles.
+        Retorna um `subscription_id` para cancelamento futuro e um `checkout_id`
+        para acompanhar o status via `GET /v1/checkouts/{checkout_id}?baas=infinitepay`.
+
+        Não envie `installments` — o comprador decide na página da InfinitePay.
+      operationId: createAnnualSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnualSubscriptionRequest'
+            example:
+              baas: infinitepay
+              customer_name: "Maria Souza"
+              customer_email: "maria@email.com"
+              amount_cents: 150000
+              currency: BRL
+              redirect_url: "https://seusite.com/assinatura/concluida"
+      responses:
+        '201':
+          description: Subscription criada e checkout gerado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSubscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  /v1/subscriptions/annual-installment:
+    post:
+      tags: [Subscriptions]
+      summary: Cria assinatura anual parcelada com card tokenizado (C6)
+      description: >
+        Cria um checkout C6 com número de parcelas configurado pelo merchant.
+        O comprador já deve ter fornecido os dados do cartão via frontend (card_hash).
+        Requer `installments` entre 2 e 12; o custo de parcelamento fica com o comprador (BY_ISSUER).
+      operationId: createAnnualInstallment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnnualInstallmentRequest'
+            example:
+              baas: c6
+              customer_name: "João Silva"
+              customer_tax_id: "12345678909"
+              customer_email: "joao@email.com"
+              amount_cents: 150000
+              currency: BRL
+              installments: 12
+              redirect_url: "https://seusite.com/assinatura/concluida"
+      responses:
+        '201':
+          description: Subscription criada e checkout gerado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSubscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  /v1/subscriptions/monthly:
+    post:
+      tags: [Subscriptions]
+      summary: Cria assinatura mensal recorrente com cartão salvo (C6)
+      description: >
+        Cria um checkout C6 com `save_card=true` e `recurrent=true`. Após o primeiro
+        pagamento, o banking guarda o token do cartão e cobra automaticamente via cron
+        todo mês sem nova interação do comprador.
+        **Exclusivo C6** — InfinitePay não suporta tokenização de cartão via API.
+      operationId: createMonthlySubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMonthlySubscriptionRequest'
+            example:
+              baas: c6
+              customer_name: "João Silva"
+              customer_tax_id: "12345678909"
+              customer_email: "joao@email.com"
+              amount_cents: 9900
+              currency: BRL
+              redirect_url: "https://seusite.com/assinatura/concluida"
+      responses:
+        '201':
+          description: Subscription criada e checkout inicial gerado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSubscriptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  /v1/subscriptions/infinitepay/plans/monthly:
+    get:
+      tags: [Subscriptions]
+      summary: Retorna o link do plano mensal InfinitePay
+      description: >
+        Devolve a URL do plano de assinatura mensal pré-criado no app InfinitePay.
+        A InfinitePay gerencia as cobranças mensais automáticas e lembretes via WhatsApp.
+        O banking apenas armazena e devolve este link estático — nenhuma chamada à
+        API da InfinitePay é feita neste endpoint.
+        Redirecione o comprador para a URL devolvida para que ele se inscreva.
+      operationId: getMonthlyPlanLink
+      responses:
+        '200':
+          description: Link do plano mensal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanLinkResponse'
+              example:
+                url: "https://invoice.infinitepay.io/plans/seu-handle/CODIGO"
+        '503':
+          description: >
+            Plano mensal não configurado (env var `INFINITEPAY_PLAN_MONTHLY_URL`
+            vazia no banking). Contate o time de operações.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/subscriptions/{id}/cancel:
+    put:
+      tags: [Subscriptions]
+      summary: Cancela uma subscription
+      description: >
+        Marca a subscription como CANCELLED e impede cobranças futuras.
+        Para assinaturas anuais ainda em `PENDING_FIRST_PAYMENT`, também tenta
+        cancelar o checkout inicial (no-op silencioso para InfinitePay, pois ela
+        não oferece cancelamento de link via API).
+      operationId: cancelSubscription
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelSubscriptionRequest'
+      responses:
+        '204':
+          description: Subscription cancelada.
+        '400':
+          description: ID inválido.
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+  # ── Admin ─────────────────────────────────────────────────────────────────────
+
+  /v1/webhooks/register:
+    post:
+      tags: [Admin]
+      summary: Registra URL de webhook com o provedor (C6 apenas)
+      description: >
+        Endpoint administrativo usado uma única vez para registrar nosso endpoint
+        de callback com a API C6 para o serviço CHECKOUT. Proteger na camada de rede.
+        Não necessário para InfinitePay (a webhook_url é enviada por checkout).
+      operationId: registerWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [baas, service, url]
+              properties:
+                baas: { type: string, example: c6 }
+                service: { type: string, example: CHECKOUT }
+                url: { type: string, format: uri }
+      responses:
+        '200':
+          description: Registro realizado com sucesso.
+        '502':
+          $ref: '#/components/responses/ProviderError'
+
+components:
+  schemas:
+
+    Address:
+      type: object
+      description: >
+        Endereço do pagador. Para InfinitePay: pré-preenche a página hospedada
+        (comprador ainda pode editar). Para C6: enviado no payload do checkout.
+      properties:
+        street:       { type: string, example: "Av. Paulista" }
+        number:       { type: string, example: "1000" }
+        complement:   { type: string, example: "Apto 42" }
+        neighborhood: { type: string, example: "Bela Vista" }
+        city:         { type: string, example: "São Paulo" }
+        state:        { type: string, example: "SP" }
+        zip_code:     { type: string, example: "01310100" }
+
+    Payer:
+      type: object
+      description: >
+        Dados do pagador. Todos opcionais — preenchê-los melhora a experiência
+        na página hospedada e enriquece o registro local no banking.
+        `tax_id` (CPF) é ignorado pelo adapter InfinitePay (não há campo na API
+        deles), mas é persistido no banco do banking e obrigatório para C6.
+      properties:
+        name:         { type: string, example: "Maria Souza" }
+        tax_id:       { type: string, example: "12345678909", description: "CPF — obrigatório para C6, ignorado na API InfinitePay" }
+        email:        { type: string, format: email }
+        phone_number: { type: string, example: "11999998888" }
+        address:      { $ref: '#/components/schemas/Address' }
+
+    CardInfo:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Token de cartão salvo em cobrança anterior (recurring).
+        card_hash:
+          type: string
+          description: Hash do cartão capturado pelo frontend no checkout inicial.
+
+    CardPayment:
+      type: object
+      required: [type, installments, capture]
+      description: Configuração de pagamento via cartão. Exclusivo C6.
+      properties:
+        type:
+          type: string
+          enum: [CREDIT, DEBIT]
+        installments:
+          type: integer
+          minimum: 1
+          maximum: 12
+        interest_type:
+          type: string
+          enum: [MERCHANT_ABSORBED, CUSTOMER_ABSORBED]
+          description: Obrigatório quando `installments > 1`.
+        recurrent:  { type: boolean, default: false }
+        save_card:  { type: boolean, default: false }
+        capture:    { type: boolean, default: true }
+        authenticate:
+          type: string
+          enum: [REQUIRED, OPTIONAL, NOT_REQUIRED]
+        card_info:  { $ref: '#/components/schemas/CardInfo' }
+
+    CreateCheckoutRequest:
+      type: object
+      required: [baas, amount_cents, currency]
+      properties:
+        baas:
+          type: string
+          enum: [infinitepay, c6]
+        external_reference_id:
+          type: string
+          description: ID do pedido no seu sistema. Recomendado para rastreabilidade.
+        amount_cents:
+          type: integer
+          format: int64
+          description: Valor em centavos.
+          example: 15000
+        currency:
+          type: string
+          example: BRL
+        description:
+          type: string
+          example: "Produto X"
+        redirect_url:
+          type: string
+          format: uri
+          description: >
+            URL para onde o navegador do comprador é levado após o pagamento.
+            Para InfinitePay: sempre configure — sem ela o comprador fica na
+            página de comprovante da InfinitePay.
+        payer:
+          $ref: '#/components/schemas/Payer'
+        card:
+          $ref: '#/components/schemas/CardPayment'
+          description: Exclusivo C6. Omitir para InfinitePay.
+
+    CreateCheckoutResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: >
+            Identificador do checkout no provedor (slug para InfinitePay, id para C6).
+            Use em `GET /v1/checkouts/{id}?baas=` para consultar o status.
+        url:
+          type: string
+          format: uri
+          description: >
+            Link de pagamento para redirecionar o comprador.
+            - InfinitePay: página hospedada (Pix, cartão, Apple Pay, Google Pay).
+            - C6: URL de checkout transparente.
+
+    CheckoutDetailsResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [CREATED, IN_PROGRESS, PAID, DECLINED, EXPIRED, CANCELLED, ERROR]
+        amount_cents:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        saved_card_token:
+          type: string
+          nullable: true
+          description: Token de cartão salvo (C6 com save_card=true). Nulo para InfinitePay.
+        paid_amount_cents:
+          type: integer
+          format: int64
+          nullable: true
+          description: Valor efetivamente cobrado. Pode diferir de amount_cents (juros de parcelamento).
+        capture_method:
+          type: string
+          nullable: true
+          enum: [pix, credit_card, debit_card]
+          description: Forma de pagamento escolhida pelo comprador. Nulo até pagar.
+        installments:
+          type: integer
+          nullable: true
+          description: Parcelas escolhidas pelo comprador (1 para Pix). Nulo até pagar.
+        receipt_url:
+          type: string
+          format: uri
+          nullable: true
+        transaction_id:
+          type: string
+          nullable: true
+          description: ID da transação no provedor (transaction_nsu na InfinitePay).
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CreateAnnualSubscriptionRequest:
+      type: object
+      required: [baas, customer_name, customer_email, amount_cents, currency, redirect_url]
+      properties:
+        baas:          { type: string, enum: [infinitepay] }
+        customer_name: { type: string }
+        customer_email: { type: string, format: email }
+        customer_tax_id: { type: string, description: "CPF — opcional para InfinitePay" }
+        amount_cents:  { type: integer, format: int64 }
+        currency:      { type: string, example: BRL }
+        redirect_url:  { type: string, format: uri }
+
+    CreateAnnualInstallmentRequest:
+      type: object
+      required: [baas, customer_name, customer_tax_id, customer_email, amount_cents, currency, installments, redirect_url]
+      properties:
+        baas:           { type: string, enum: [c6] }
+        customer_name:  { type: string }
+        customer_tax_id: { type: string }
+        customer_email: { type: string, format: email }
+        amount_cents:   { type: integer, format: int64 }
+        currency:       { type: string, example: BRL }
+        installments:
+          type: integer
+          minimum: 2
+          maximum: 12
+          description: Número de parcelas. Juros ficam com o comprador (BY_ISSUER).
+        redirect_url:   { type: string, format: uri }
+
+    CreateMonthlySubscriptionRequest:
+      type: object
+      required: [baas, customer_name, customer_tax_id, customer_email, amount_cents, currency, redirect_url]
+      properties:
+        baas:           { type: string, enum: [c6] }
+        customer_name:  { type: string }
+        customer_tax_id: { type: string }
+        customer_email: { type: string, format: email }
+        amount_cents:   { type: integer, format: int64 }
+        currency:       { type: string, example: BRL }
+        redirect_url:   { type: string, format: uri }
+
+    CreateSubscriptionResponse:
+      type: object
+      properties:
+        subscription_id:
+          type: string
+          format: uuid
+          description: Guarde para cancelamento futuro.
+        checkout_id:
+          type: string
+          description: Use em `GET /v1/checkouts/{id}?baas=` para acompanhar o pagamento.
+        checkout_url:
+          type: string
+          format: uri
+          description: Redirecione o comprador para esta URL.
+
+    PlanLinkResponse:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Redirecione o comprador para se inscrever no plano mensal.
+
+    CancelSubscriptionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          description: Motivo do cancelamento (log interno).
+        refund_current_cycle:
+          type: boolean
+          default: false
+          description: Se true, tenta reverter o checkout do ciclo atual (apenas se já pago).
+
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+
+  responses:
+    BadRequest:
+      description: Payload inválido ou campo obrigatório ausente.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ProviderError:
+      description: Falha ao comunicar com o provedor de pagamento.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }

@@ -25,6 +25,11 @@ type RegisterWebhookRequest struct {
 // Service == CHECKOUT, the provider's InboundParser also extracts
 // ProviderCheckoutID/SavedCardToken so consumers never have to parse the
 // provider-specific "information" payload themselves.
+//
+// Payment confirmation fields (PaidAmountCents … PaidAt) are populated by
+// providers whose webhook carries full payment details (InfinitePay). They
+// are nil for providers that require a separate GET call to confirm payment
+// details (C6).
 type InboundEvent struct {
 	BaaS               string
 	ExternalID         string
@@ -37,4 +42,11 @@ type InboundEvent struct {
 	RawPayload         []byte
 	ProviderCheckoutID string
 	SavedCardToken     *string
+	// Payment confirmation details — populated by InfinitePay webhook adapter.
+	PaidAmountCents *int64
+	CaptureMethod   *string
+	Installments    *int
+	ReceiptURL      *string
+	TransactionID   *string
+	PaidAt          *time.Time
 }

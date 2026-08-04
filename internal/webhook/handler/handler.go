@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/upwifi/banking/internal/webhook/domain"
@@ -11,19 +12,21 @@ import (
 )
 
 type Handler struct {
-	svc        *service.Service
-	pathSecret string
+	svc                   *service.Service
+	c6PathSecret          string
+	infinitePayPathSecret string
 }
 
-// New creates the webhook handler. pathSecret is embedded in the inbound
-// route to give it some obscurity, since C6 does not document an HMAC
-// signature we could otherwise verify.
-func New(svc *service.Service, pathSecret string) *Handler {
-	return &Handler{svc: svc, pathSecret: pathSecret}
+// New creates the webhook handler. c6PathSecret is embedded in the C6 inbound
+// route for obscurity (C6 documents no HMAC signature). infinitePayPathSecret
+// serves the same purpose for the InfinitePay inbound route.
+func New(svc *service.Service, c6PathSecret, infinitePayPathSecret string) *Handler {
+	return &Handler{svc: svc, c6PathSecret: c6PathSecret, infinitePayPathSecret: infinitePayPathSecret}
 }
 
 func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("POST /webhooks/c6/"+h.pathSecret, h.receiveC6)
+	mux.HandleFunc("POST /webhooks/c6/"+h.c6PathSecret, h.receiveC6)
+	mux.HandleFunc("POST /webhooks/infinitepay/"+h.infinitePayPathSecret, h.receiveInfinitePay)
 	mux.HandleFunc("POST /v1/webhooks/register", h.register)
 }
 
@@ -44,6 +47,21 @@ func (h *Handler) receiveC6(w http.ResponseWriter, r *http.Request) {
 		// and shouldn't trigger aggressive redelivery from C6.
 		w.WriteHeader(http.StatusOK)
 		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) receiveInfinitePay(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	if err := h.svc.ProcessInbound(r.Context(), "infinitepay", body); err != nil {
+		// InfinitePay retries on 400; still ack 200 to avoid retry storms
+		// from transient processing errors. Failures are logged/persisted.
+		slog.Error("infinitepay webhook: process failed", "error", err)
 	}
 	w.WriteHeader(http.StatusOK)
 }

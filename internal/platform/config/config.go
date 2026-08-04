@@ -24,6 +24,13 @@ type Config struct {
 	C6ExpectedClientID  string
 	C6ExpectedPartnerID string
 
+	// InfinitePay provider (all optional — deployment may use only C6)
+	InfinitePayBaseURL           string // default: https://api.checkout.infinitepay.io
+	InfinitePayHandle            string // InfiniteTag without leading '$'
+	InfinitePayWebhookURL        string // public URL of our POST /webhooks/infinitepay/{secret} endpoint
+	InfinitePayWebhookPathSecret string // path token for minimal obscurity on the inbound route
+	InfinitePayPlanMonthlyURL    string // pre-created monthly plan link from InfinitePay app
+
 	CronChargeInterval string // cron expression, default hourly
 
 	LogLevel    string // debug, info, warn, error
@@ -34,21 +41,26 @@ type Config struct {
 // return an error if missing so the process fails fast at startup.
 func Load() (*Config, error) {
 	cfg := &Config{
-		HTTPAddr:            getEnvDefault("HTTP_ADDR", ":8080"),
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		C6Env:               getEnvDefault("C6_ENV", "sandbox"),
-		C6ClientID:          os.Getenv("C6_CLIENT_ID"),
-		C6ClientSecret:      os.Getenv("C6_CLIENT_SECRET"),
-		C6MTLSCertPath:      os.Getenv("C6_MTLS_CERT_PATH"),
-		C6MTLSKeyPath:       os.Getenv("C6_MTLS_KEY_PATH"),
-		C6PartnerName:       getEnvDefault("C6_PARTNER_SOFTWARE_NAME", "banking"),
-		C6PartnerVersion:    getEnvDefault("C6_PARTNER_SOFTWARE_VERSION", "0.1.0"),
-		WebhookPathSecret:   os.Getenv("C6_WEBHOOK_PATH_SECRET"),
-		C6ExpectedClientID:  os.Getenv("C6_EXPECTED_CLIENT_ID"),
-		C6ExpectedPartnerID: os.Getenv("C6_EXPECTED_PARTNER_ID"),
-		CronChargeInterval:  getEnvDefault("CRON_CHARGE_INTERVAL", "@hourly"),
-		LogLevel:            getEnvDefault("LOG_LEVEL", "info"),
-		LogHTTPBody:         getEnvDefault("LOG_HTTP_BODY", "false") == "true",
+		HTTPAddr:                     getEnvDefault("HTTP_ADDR", ":8080"),
+		DatabaseURL:                  os.Getenv("DATABASE_URL"),
+		C6Env:                        getEnvDefault("C6_ENV", "sandbox"),
+		C6ClientID:                   os.Getenv("C6_CLIENT_ID"),
+		C6ClientSecret:               os.Getenv("C6_CLIENT_SECRET"),
+		C6MTLSCertPath:               os.Getenv("C6_MTLS_CERT_PATH"),
+		C6MTLSKeyPath:                os.Getenv("C6_MTLS_KEY_PATH"),
+		C6PartnerName:                getEnvDefault("C6_PARTNER_SOFTWARE_NAME", "banking"),
+		C6PartnerVersion:             getEnvDefault("C6_PARTNER_SOFTWARE_VERSION", "0.1.0"),
+		WebhookPathSecret:            os.Getenv("C6_WEBHOOK_PATH_SECRET"),
+		C6ExpectedClientID:           os.Getenv("C6_EXPECTED_CLIENT_ID"),
+		C6ExpectedPartnerID:          os.Getenv("C6_EXPECTED_PARTNER_ID"),
+		InfinitePayBaseURL:           getEnvDefault("INFINITEPAY_BASE_URL", "https://api.checkout.infinitepay.io"),
+		InfinitePayHandle:            os.Getenv("INFINITEPAY_HANDLE"),
+		InfinitePayWebhookURL:        os.Getenv("INFINITEPAY_WEBHOOK_URL"),
+		InfinitePayWebhookPathSecret: os.Getenv("INFINITEPAY_WEBHOOK_PATH_SECRET"),
+		InfinitePayPlanMonthlyURL:    os.Getenv("INFINITEPAY_PLAN_MONTHLY_URL"),
+		CronChargeInterval:           getEnvDefault("CRON_CHARGE_INTERVAL", "@hourly"),
+		LogLevel:                     getEnvDefault("LOG_LEVEL", "info"),
+		LogHTTPBody:                  getEnvDefault("LOG_HTTP_BODY", "false") == "true",
 	}
 
 	required := map[string]string{
