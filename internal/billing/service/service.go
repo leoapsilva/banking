@@ -265,6 +265,12 @@ func (s *Service) HandleCheckoutEvent(ctx context.Context, event webhookdomain.I
 
 	switch event.Status {
 	case string(checkoutdomain.StatusPaid):
+		// A forged notification is the cheapest way to get a subscription
+		// for free, so confirm the reported amount before activating.
+		if !paymentAmountTrusted(checkoutRow, event) {
+			logRejectedPayment(checkoutRow, event)
+			return nil
+		}
 		return s.activateFromPaidEvent(ctx, *sub, checkoutRow.ID, event)
 	case string(checkoutdomain.StatusDeclined), string(checkoutdomain.StatusExpired), string(checkoutdomain.StatusError):
 		return s.repo.Cancel(ctx, sub.ID, "initial checkout "+event.Status)
