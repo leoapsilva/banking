@@ -91,7 +91,41 @@ func Load() (*Config, error) {
 		}
 	}
 
+	if err := validateInfinitePayWebhook(cfg); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// validateInfinitePayWebhook refuses a webhook URL that does not end with the
+// configured path token.
+//
+// The token is not a credential we receive from InfinitePay: it is a value we
+// invent, and it becomes part of the route the service registers
+// (POST /webhooks/infinitepay/<token>). We hand that full URL to InfinitePay
+// on every checkout, so the two settings must agree.
+//
+// Getting this wrong is silent and expensive: everything looks healthy, the
+// buyer pays, InfinitePay POSTs to a path that does not exist, and the
+// subscription never activates. Failing at startup is the only cheap moment
+// to catch it.
+func validateInfinitePayWebhook(cfg *Config) error {
+	// InfinitePay is optional — skip when the integration is not configured.
+	if cfg.InfinitePayWebhookURL == "" && cfg.InfinitePayWebhookPathSecret == "" {
+		return nil
+	}
+	if cfg.InfinitePayWebhookURL == "" || cfg.InfinitePayWebhookPathSecret == "" {
+		return fmt.Errorf(
+			"INFINITEPAY_WEBHOOK_URL and INFINITEPAY_WEBHOOK_PATH_SECRET must be set together")
+	}
+	if !strings.HasSuffix(strings.TrimRight(cfg.InfinitePayWebhookURL, "/"), "/"+cfg.InfinitePayWebhookPathSecret) {
+		return fmt.Errorf(
+			"INFINITEPAY_WEBHOOK_URL must end with /%s (the value of INFINITEPAY_WEBHOOK_PATH_SECRET); "+
+				"otherwise InfinitePay posts payment notifications to a route this service does not serve",
+			cfg.InfinitePayWebhookPathSecret)
+	}
+	return nil
 }
 
 // C6BaseURL returns the host for the configured environment.
