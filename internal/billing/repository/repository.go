@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	checkoutdomain "github.com/upwifi/banking/internal/checkout/domain"
-	"github.com/upwifi/banking/internal/subscription/domain"
+	"github.com/upwifi/banking/internal/billing/domain"
 )
 
 var ErrNotFound = errors.New("subscription: not found")

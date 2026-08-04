@@ -32,9 +32,9 @@ import (
 	c6client "github.com/upwifi/banking/internal/provider/c6/client"
 	infinitepayprovider "github.com/upwifi/banking/internal/provider/infinitepay"
 	infinitepayclient "github.com/upwifi/banking/internal/provider/infinitepay/client"
-	subscriptionhandler "github.com/upwifi/banking/internal/subscription/handler"
-	subscriptionrepo "github.com/upwifi/banking/internal/subscription/repository"
-	subscriptionservice "github.com/upwifi/banking/internal/subscription/service"
+	billinghandler "github.com/upwifi/banking/internal/billing/handler"
+	billingrepo "github.com/upwifi/banking/internal/billing/repository"
+	billingservice "github.com/upwifi/banking/internal/billing/service"
 	webhookhandler "github.com/upwifi/banking/internal/webhook/handler"
 	webhookrepo "github.com/upwifi/banking/internal/webhook/repository"
 	webhookservice "github.com/upwifi/banking/internal/webhook/service"
@@ -114,11 +114,11 @@ func run() error {
 	})
 	webhookHandlerInst := webhookhandler.New(webhookSvc, cfg.WebhookPathSecret, cfg.InfinitePayWebhookPathSecret)
 
-	subscriptionRepository := subscriptionrepo.New(pool)
-	subscriptionSvc := subscriptionservice.New(subscriptionRepository, checkoutRepository, checkoutSvc)
-	subscriptionHandlerInst := subscriptionhandler.New(subscriptionSvc, cfg.InfinitePayPlanMonthlyURL)
+	billingRepository := billingrepo.New(pool)
+	billingSvc := billingservice.New(billingRepository, checkoutRepository, checkoutSvc)
+	billingHandlerInst := billinghandler.New(billingSvc, cfg.InfinitePayPlanMonthlyURL)
 
-	webhookSvc.SetCheckoutSink(subscriptionSvc)
+	webhookSvc.SetCheckoutSink(billingSvc)
 
 	boletoRepository := boletorepo.New(pool)
 	boletoSvc := boletoservice.New(registry, boletoRepository)
@@ -140,7 +140,7 @@ func run() error {
 	})
 	checkoutHandler.Register(mux)
 	webhookHandlerInst.Register(mux)
-	subscriptionHandlerInst.Register(mux)
+	billingHandlerInst.Register(mux)
 	boletoHandlerInst.Register(mux)
 	pixHandlerInst.Register(mux)
 	paymentSchedulingHandlerInst.Register(mux)
@@ -152,7 +152,7 @@ func run() error {
 
 	// --- Cron worker: recurring monthly billing cycles ---
 	worker := cronworker.New()
-	if err := worker.Schedule("charge-due-subscriptions", cfg.CronChargeInterval, subscriptionSvc.ChargeDueSubscriptions); err != nil {
+	if err := worker.Schedule("charge-due-subscriptions", cfg.CronChargeInterval, billingSvc.ChargeDueSubscriptions); err != nil {
 		return err
 	}
 	worker.Start()

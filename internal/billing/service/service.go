@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/upwifi/banking/internal/billing"
+	"github.com/upwifi/banking/internal/billing/domain"
+	"github.com/upwifi/banking/internal/billing/repository"
 	checkoutdomain "github.com/upwifi/banking/internal/checkout/domain"
 	checkoutrepo "github.com/upwifi/banking/internal/checkout/repository"
-	checkoutservice "github.com/upwifi/banking/internal/checkout/service"
-	"github.com/upwifi/banking/internal/subscription/domain"
-	"github.com/upwifi/banking/internal/subscription/repository"
 	webhookdomain "github.com/upwifi/banking/internal/webhook/domain"
 	"github.com/upwifi/banking/pkg/idgen"
 )
@@ -23,11 +23,14 @@ import (
 // checkout webhook events (it implements webhook.CheckoutEventSink).
 type Service struct {
 	repo         *repository.Repository
-	checkoutRepo *checkoutrepo.Repository
-	checkoutSvc  *checkoutservice.Service
+	checkoutRepo billing.CheckoutStore
+	checkoutSvc  billing.PaymentGateway
 }
 
-func New(repo *repository.Repository, checkoutRepo *checkoutrepo.Repository, checkoutSvc *checkoutservice.Service) *Service {
+// New wires the billing service to the payment layer through the ports
+// declared in billing.PaymentGateway / billing.CheckoutStore, rather than to
+// concrete checkout types — see the boundary rule in internal/billing/port.go.
+func New(repo *repository.Repository, checkoutRepo billing.CheckoutStore, checkoutSvc billing.PaymentGateway) *Service {
 	return &Service{repo: repo, checkoutRepo: checkoutRepo, checkoutSvc: checkoutSvc}
 }
 

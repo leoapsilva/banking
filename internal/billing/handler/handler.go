@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	checkoutdomain "github.com/upwifi/banking/internal/checkout/domain"
-	"github.com/upwifi/banking/internal/subscription/service"
+	"github.com/upwifi/banking/internal/billing/service"
 )
 
 type Handler struct {
