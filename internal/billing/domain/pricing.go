@@ -17,6 +17,16 @@ var (
 	ErrCouponExpired    = errors.New("billing: coupon outside its validity window")
 	ErrCouponExhausted  = errors.New("billing: coupon redemption limit reached")
 	ErrCouponNotForPlan = errors.New("billing: coupon does not apply to this plan frequency")
+
+	// ErrCouponExceedsPlan guards against a fixed-amount coupon worth as much
+	// as (or more than) the plan it is applied to — e.g. a R$199,91 discount
+	// on a R$99,99 plan.
+	//
+	// Charging zero silently would be worse than refusing: it hides an
+	// operator mistake behind a successful-looking purchase, and providers
+	// reject zero-value charges anyway. Free access is a deliberate act, not
+	// the accidental result of arithmetic — see grantComplimentary.
+	ErrCouponExceedsPlan = errors.New("billing: coupon discount is not smaller than the plan price")
 )
 
 // Plan is a priced entry in the catalogue. The amount lives here rather than
@@ -71,22 +81,30 @@ func (c Coupon) Validate(plan Plan, now time.Time) error {
 	return nil
 }
 
-// apply returns the discounted amount in cents, never below zero.
-func (c Coupon) apply(amountCents int64) int64 {
+// apply returns the discounted amount in cents.
+//
+// It refuses rather than clamps: a discount that wipes out the plan price is
+// an operator error (wrong coupon attached to a cheaper plan), and turning it
+// into a zero charge would hide that error behind what looks like a
+// successful purchase.
+func (c Coupon) apply(amountCents int64) (int64, error) {
 	var discounted int64
 	switch {
 	case c.PercentOff != nil:
 		// Integer arithmetic on cents: no float rounding drift.
+		// PercentOff is capped at 100 by the schema, so this cannot go
+		// negative — but 100% still means a zero charge, which is refused
+		// below like any other.
 		discounted = amountCents - (amountCents * int64(*c.PercentOff) / 100)
 	case c.AmountOffCents != nil:
 		discounted = amountCents - *c.AmountOffCents
 	default:
-		return amountCents
+		return amountCents, nil
 	}
-	if discounted < 0 {
-		return 0
+	if discounted <= 0 {
+		return 0, ErrCouponExceedsPlan
 	}
-	return discounted
+	return discounted, nil
 }
 
 // PricedCharge is the outcome of resolving a plan (and optional coupon) into
@@ -130,9 +148,13 @@ func ResolvePrice(plan Plan, coupon *Coupon, now time.Time) (PricedCharge, error
 	if err := coupon.Validate(plan, now); err != nil {
 		return PricedCharge{}, err
 	}
+	discounted, err := coupon.apply(plan.Amount.AmountCents)
+	if err != nil {
+		return PricedCharge{}, err
+	}
 	priced.Coupon = coupon
 	priced.Amount = checkoutdomain.Money{
-		AmountCents: coupon.apply(plan.Amount.AmountCents),
+		AmountCents: discounted,
 		Currency:    plan.Amount.Currency,
 	}
 	return priced, nil

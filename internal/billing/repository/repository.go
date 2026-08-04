@@ -134,6 +134,11 @@ func (r *Repository) DueForCharge(ctx context.Context, now time.Time) ([]domain.
 			consecutive_failures
 		FROM subscriptions
 		WHERE status = $1 AND next_charge_date <= $2
+		  -- Courtesy subscriptions are never charged. Granting one already
+		  -- clears next_charge_date, so this is redundant by design: it is
+		  -- the guard that holds if anything else ever sets that date again.
+		  AND NOT complimentary_forever
+		  AND (complimentary_until IS NULL OR complimentary_until < $2)
 		FOR UPDATE SKIP LOCKED
 	`, domain.StatusActive, now)
 	if err != nil {

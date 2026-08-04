@@ -77,17 +77,59 @@ func TestRenewalKeepsForeverCoupon(t *testing.T) {
 	}
 }
 
-func TestFixedAmountCouponNeverGoesNegative(t *testing.T) {
+// A discount worth more than the plan is an operator error — a coupon meant
+// for an expensive plan attached to a cheap one. Refuse it instead of
+// charging zero, which would hide the mistake behind a successful purchase.
+func TestFixedCouponLargerThanPlanRejected(t *testing.T) {
+	cheapPlan := annualPlan()
+	cheapPlan.Amount.AmountCents = 9999 // R$ 99,99
+
 	coupon := &Coupon{
-		AmountOffCents: ptrI64(99999), Duration: CouponOnce,
+		AmountOffCents: ptrI64(19991), Duration: CouponOnce, // R$ 199,91
+		ApplicableFrequencies: []Frequency{FrequencyAnnual},
+	}
+	_, err := ResolvePrice(cheapPlan, coupon, time.Now())
+	if !errors.Is(err, ErrCouponExceedsPlan) {
+		t.Errorf("err = %v, want ErrCouponExceedsPlan", err)
+	}
+}
+
+// Exactly zeroing the plan is refused too: free access must be granted
+// deliberately, not fall out of arithmetic.
+func TestCouponZeroingPlanRejected(t *testing.T) {
+	coupon := &Coupon{
+		AmountOffCents: ptrI64(29990), Duration: CouponOnce,
+		ApplicableFrequencies: []Frequency{FrequencyAnnual},
+	}
+	_, err := ResolvePrice(annualPlan(), coupon, time.Now())
+	if !errors.Is(err, ErrCouponExceedsPlan) {
+		t.Errorf("err = %v, want ErrCouponExceedsPlan", err)
+	}
+}
+
+func TestHundredPercentCouponRejected(t *testing.T) {
+	coupon := &Coupon{
+		PercentOff: ptrInt(100), Duration: CouponOnce,
+		ApplicableFrequencies: []Frequency{FrequencyAnnual},
+	}
+	_, err := ResolvePrice(annualPlan(), coupon, time.Now())
+	if !errors.Is(err, ErrCouponExceedsPlan) {
+		t.Errorf("err = %v, want ErrCouponExceedsPlan (use a courtesy grant instead)", err)
+	}
+}
+
+// The CORESVIP case: R$ 199,91 off the R$ 299,90 plan → R$ 99,99.
+func TestFixedCouponSmallerThanPlanAccepted(t *testing.T) {
+	coupon := &Coupon{
+		AmountOffCents: ptrI64(19991), Duration: CouponOnce,
 		ApplicableFrequencies: []Frequency{FrequencyAnnual},
 	}
 	got, err := ResolvePrice(annualPlan(), coupon, time.Now())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Amount.AmountCents != 0 {
-		t.Errorf("amount = %d, want 0 (clamped)", got.Amount.AmountCents)
+	if got.Amount.AmountCents != 9999 {
+		t.Errorf("amount = %d, want 9999 (R$ 99,99)", got.Amount.AmountCents)
 	}
 }
 
