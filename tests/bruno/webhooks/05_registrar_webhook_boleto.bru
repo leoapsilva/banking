@@ -1,0 +1,31 @@
+meta {
+  name: 05 Registrar webhook de boleto no C6 (B_07 v3.0)
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{base_url}}/v1/webhooks/register
+  body: json
+  auth: none
+}
+
+docs {
+  Cobre o item B_07 (Cadastro do webhook de boleto) do roteiro v3.0.
+  Registra um webhook para o serviço BANK_SLIP no C6 (o mesmo endpoint
+  /webhooks/ do C6, service=BANK_SLIP). Tem efeito colateral persistente na
+  conta sandbox, por isso fica fora da execução padrão da suíte (rodar
+  manualmente para gerar a evidência).
+}
+
+body:json {
+  {
+    "baas": "{{baas}}",
+    "service": "BANK_SLIP",
+    "url": "{{webhook_public_url}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+}

@@ -1,0 +1,34 @@
+meta {
+  name: 06 Receber notificacao de boleto pago (inadimplencia)
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{base_url}}/webhooks/c6/{{webhook_path_secret}}
+  body: json
+  auth: none
+}
+
+docs {
+  Simula o callback do C6 quando um boleto é liquidado (status PAID). Para
+  boleto, o C6 envia o id do objeto no campo de topo external_id (diferente
+  do checkout, que traz o id dentro de "information"). O sink de boleto
+  (internal/boleto/service HandleBankSlipEvent) usa esse external_id para
+  achar o boleto e reconciliar o status localmente -> base do controle de
+  inadimplência / corte de acesso. Reusa o {{bank_slip_id}} emitido no
+  teste boleto/01.
+}
+
+body:json {
+  {
+    "external_id": "{{bank_slip_id}}",
+    "date_time": "2026-07-12T21:30:00.000000000Z",
+    "service": "BANK_SLIP",
+    "status": "PAID"
+  }
+}
+
+assert {
+  res.status: eq 200
+}

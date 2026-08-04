@@ -11,6 +11,9 @@ import (
 type Provider interface {
 	Create(ctx context.Context, req domain.CreateBankSlipRequest) (domain.BankSlipResult, error)
 	Get(ctx context.Context, providerBankSlipID string) (domain.BankSlipDetails, error)
+	// GetPDF returns the bank slip rendered as raw PDF bytes. The provider
+	// (e.g. C6) generates the PDF; we only proxy it.
+	GetPDF(ctx context.Context, providerBankSlipID string) ([]byte, error)
 	Update(ctx context.Context, providerBankSlipID string, req domain.UpdateBankSlipRequest) (domain.BankSlipDetails, error)
 	Cancel(ctx context.Context, providerBankSlipID string) error
 }

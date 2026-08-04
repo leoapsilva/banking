@@ -1,0 +1,36 @@
+meta {
+  name: 22 Consultar PDF do boleto (B_06 v3.0)
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{base_url}}/v1/bank-slips/{{bank_slip_id}}/pdf?baas={{baas}}
+  auth: none
+}
+
+docs {
+  Cobre o item B_06 (Geração de PDF do boleto) do roteiro v3.0. Nossa API
+  faz proxy do endpoint GET /bank_slips/{id}/pdf do C6, que gera o PDF; por
+  padrão devolvemos JSON com base64_pdf_file (útil como evidência de
+  homologação). Reusa o {{bank_slip_id}} emitido no teste 01.
+}
+
+assert {
+  res.status: eq 200
+  res.body.base64_pdf_file: isDefined
+}
+
+script:post-response {
+  if (res.status === 200) {
+    // A Base64 de um PDF valido comeca com "JVBERi0" ("%PDF-" em base64).
+    const b64 = res.body.base64_pdf_file || "";
+    bru.setVar("pdf_starts_with_pdf_magic", b64.startsWith("JVBERi0"));
+  }
+}
+
+tests {
+  test("base64 corresponde a um PDF (magic %PDF-)", function () {
+    expect(bru.getVar("pdf_starts_with_pdf_magic")).to.equal(true);
+  });
+}

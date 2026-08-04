@@ -39,6 +39,13 @@ func (a *BoletoAdapter) Get(ctx context.Context, providerBankSlipID string) (bol
 	return mapper.FromC6BankSlipResponse(resp)
 }
 
+// GetPDF returns the raw PDF bytes for a bank slip. C6's /pdf endpoint
+// streams the PDF directly (application/pdf) rather than a JSON base64
+// wrapper, so we fetch the raw body.
+func (a *BoletoAdapter) GetPDF(ctx context.Context, providerBankSlipID string) ([]byte, error) {
+	return a.client.DoRaw(ctx, http.MethodGet, "/"+providerBankSlipID+"/pdf")
+}
+
 func (a *BoletoAdapter) Update(ctx context.Context, providerBankSlipID string, req boletodomain.UpdateBankSlipRequest) (boletodomain.BankSlipDetails, error) {
 	body, err := mapper.ToC6AlterBankSlipRequest(req)
 	if err != nil {
