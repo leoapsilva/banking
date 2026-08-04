@@ -75,8 +75,13 @@ jobs:
           C6_MTLS_CERT_PATH: /tmp/ci-certs/client.crt
           C6_MTLS_KEY_PATH: /tmp/ci-certs/client.key
           C6_WEBHOOK_URL_TOKEN: ci-webhook-secret
+          # As duas variáveis abaixo devem terminar no mesmo token — ver
+          # validateInfinitePayWebhook em internal/platform/config/config.go,
+          # que recusa o startup se uma estiver sem a outra ou não baterem.
           INFINITEPAY_WEBHOOK_URL_TOKEN: ci-infinitepay-secret
+          INFINITEPAY_WEBHOOK_URL: http://localhost:8080/webhooks/infinitepay/ci-infinitepay-secret
           INFINITEPAY_HANDLE: ci-handle
+          INFINITEPAY_BASE_URL: https://api.checkout.infinitepay.io
           # API_KEYS vazio deixa as rotas anônimas neste ambiente efêmero, para
           # que a coleção Bruno rode sem carregar chave. A autenticação em si é
           # coberta pelos testes unitários de internal/platform/httpserver.
