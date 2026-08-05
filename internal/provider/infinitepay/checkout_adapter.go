@@ -37,7 +37,7 @@ func (a *CheckoutAdapter) Create(ctx context.Context, req checkoutdomain.CreateC
 	if err := a.client.Do(ctx, http.MethodPost, "/links", body, &resp); err != nil {
 		return checkoutdomain.CheckoutResult{}, err
 	}
-	return mapper.FromCreateLinkResponse(resp), nil
+	return mapper.FromCreateLinkResponse(resp, req.ExternalReferenceID), nil
 }
 
 // Authorize is not supported: InfinitePay has no tokenized-card charge API.

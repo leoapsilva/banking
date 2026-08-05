@@ -134,20 +134,42 @@ func TestToCreateLinkRequest_WebhookURLAndOrderNSU(t *testing.T) {
 	}
 }
 
+// ProviderCheckoutID must come from the order_nsu we generated, not
+// resp.Slug — verified against a real sandbox call where POST /links
+// returned only `url`, no `slug` field at all, despite the documented
+// response shape. Using resp.Slug made ProviderCheckoutID always empty,
+// which broke webhook correlation and collided with the (baas,
+// provider_checkout_id) unique constraint on every checkout after the
+// first.
 func TestFromCreateLinkResponse(t *testing.T) {
 	resp := dto.CreateLinkResponse{
-		Slug: "abc123slug",
-		URL:  "https://checkout.infinitepay.com.br/abc123slug",
+		URL: "https://checkout.infinitepay.io/cores-app-br?lenc=abc123",
 	}
-	got := FromCreateLinkResponse(resp)
+	got := FromCreateLinkResponse(resp, "ORDER-001")
 
-	if got.ProviderCheckoutID != "abc123slug" {
-		t.Errorf("ProviderCheckoutID = %q, want %q", got.ProviderCheckoutID, "abc123slug")
+	if got.ProviderCheckoutID != "ORDER-001" {
+		t.Errorf("ProviderCheckoutID = %q, want %q", got.ProviderCheckoutID, "ORDER-001")
 	}
-	if got.CheckoutURL != "https://checkout.infinitepay.com.br/abc123slug" {
-		t.Errorf("CheckoutURL = %q, want %q", got.CheckoutURL, "https://checkout.infinitepay.com.br/abc123slug")
+	if got.CheckoutURL != "https://checkout.infinitepay.io/cores-app-br?lenc=abc123" {
+		t.Errorf("CheckoutURL = %q, want %q", got.CheckoutURL, "https://checkout.infinitepay.io/cores-app-br?lenc=abc123")
 	}
 	if got.Status != domain.StatusCreated {
 		t.Errorf("Status = %q, want %q", got.Status, domain.StatusCreated)
+	}
+}
+
+// Even if InfinitePay starts returning a slug in the future, order_nsu must
+// still win: the webhook only ever echoes back order_nsu, so using anything
+// else as ProviderCheckoutID would make correlation impossible regardless
+// of what the creation response contains.
+func TestFromCreateLinkResponseIgnoresSlugEvenIfPresent(t *testing.T) {
+	resp := dto.CreateLinkResponse{
+		Slug: "some-slug-infinitepay-might-add-later",
+		URL:  "https://checkout.infinitepay.io/cores-app-br?lenc=abc123",
+	}
+	got := FromCreateLinkResponse(resp, "ORDER-001")
+
+	if got.ProviderCheckoutID != "ORDER-001" {
+		t.Errorf("ProviderCheckoutID = %q, want %q (order_nsu must win over slug)", got.ProviderCheckoutID, "ORDER-001")
 	}
 }
