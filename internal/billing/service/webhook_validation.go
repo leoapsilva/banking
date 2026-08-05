@@ -51,3 +51,38 @@ func logRejectedPayment(checkout checkoutrepo.Checkout, event webhookdomain.Inbo
 		"reported_cents", paid,
 	)
 }
+
+// orderReferenceTrusted reports whether a webhook's order_nsu (InfinitePay's
+// echo of the reference we supplied when creating the checkout, see
+// https://www.infinitepay.io/checkout-documentacao) matches what we stored.
+//
+// This is a second, independent signal alongside the amount check: the two
+// are set at different points (order_nsu at checkout creation, amount is the
+// price) and a forger who fakes one has to fake both.
+//
+// Events with no order_nsu are accepted — the field wasn't documented as
+// carried by the webhook until this check was added, and providers other
+// than InfinitePay never populate it. Absence is not evidence of forgery;
+// only a mismatched value is.
+func orderReferenceTrusted(checkout checkoutrepo.Checkout, event webhookdomain.InboundEvent) bool {
+	if event.OrderNSU == nil {
+		return true
+	}
+	return checkout.ExternalReferenceID == "" || *event.OrderNSU == checkout.ExternalReferenceID
+}
+
+// logRejectedOrderReference records an order_nsu mismatch the same way
+// logRejectedPayment records an amount mismatch — visible to an operator,
+// nothing secret in either value.
+func logRejectedOrderReference(checkout checkoutrepo.Checkout, event webhookdomain.InboundEvent) {
+	var got string
+	if event.OrderNSU != nil {
+		got = *event.OrderNSU
+	}
+	slog.Error("billing: refusing PAID webhook with order_nsu mismatch",
+		"provider_checkout_id", checkout.ProviderCheckoutID,
+		"baas", string(checkout.BaaS),
+		"expected_order_nsu", checkout.ExternalReferenceID,
+		"reported_order_nsu", got,
+	)
+}

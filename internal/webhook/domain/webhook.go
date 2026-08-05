@@ -42,6 +42,10 @@ type InboundEvent struct {
 	RawPayload         []byte
 	ProviderCheckoutID string
 	SavedCardToken     *string
+	// OrderNSU is the merchant-supplied order reference InfinitePay echoes
+	// back in its webhook. Populated only by the InfinitePay adapter — nil
+	// for providers that don't carry this in the webhook payload.
+	OrderNSU *string
 	// Payment confirmation details — populated by InfinitePay webhook adapter.
 	PaidAmountCents *int64
 	CaptureMethod   *string

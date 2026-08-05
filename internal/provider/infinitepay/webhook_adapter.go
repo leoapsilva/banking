@@ -43,7 +43,7 @@ func (a *WebhookAdapter) ParseInbound(_ context.Context, rawBody []byte) (webhoo
 	receiptURL := p.ReceiptURL
 	transactionID := p.TransactionNSU
 
-	return webhookdomain.InboundEvent{
+	event := webhookdomain.InboundEvent{
 		BaaS: string(checkoutdomain.BaaSInfinitePay),
 		// ExternalID must be stable across retransmissions for deduplication.
 		// invoice_slug + transaction_nsu is the most granular stable identity
@@ -61,5 +61,17 @@ func (a *WebhookAdapter) ParseInbound(_ context.Context, rawBody []byte) (webhoo
 		ReceiptURL:         &receiptURL,
 		TransactionID:      &transactionID,
 		PaidAt:             &now,
-	}, nil
+	}
+
+	// order_nsu echoes back the reference we supplied when creating the
+	// checkout (internal/provider/infinitepay/mapper.ToCreateLinkRequest).
+	// Documented at https://www.infinitepay.io/checkout-documentacao. Left
+	// nil when absent so callers can distinguish "not provided" from "empty
+	// string" rather than validating against a value that was never sent.
+	if p.OrderNSU != "" {
+		orderNSU := p.OrderNSU
+		event.OrderNSU = &orderNSU
+	}
+
+	return event, nil
 }

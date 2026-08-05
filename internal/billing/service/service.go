@@ -271,6 +271,13 @@ func (s *Service) HandleCheckoutEvent(ctx context.Context, event webhookdomain.I
 			logRejectedPayment(checkoutRow, event)
 			return nil
 		}
+		// Second, independent signal: InfinitePay echoes back the order_nsu
+		// we supplied at checkout creation. A forger who fakes the amount
+		// still has to guess this too.
+		if !orderReferenceTrusted(checkoutRow, event) {
+			logRejectedOrderReference(checkoutRow, event)
+			return nil
+		}
 		return s.activateFromPaidEvent(ctx, *sub, checkoutRow.ID, event)
 	case string(checkoutdomain.StatusDeclined), string(checkoutdomain.StatusExpired), string(checkoutdomain.StatusError):
 		return s.repo.Cancel(ctx, sub.ID, "initial checkout "+event.Status)
