@@ -1,0 +1,99 @@
+name: Backup Diário Agendado
+
+# O deploy.yml já faz backup antes de cada deploy, mas só roda em "push" na
+# main. Sem esta agenda própria, dias sem deploy ficam sem backup nenhum —
+# mesmo problema real confirmado no repo manicure (issue #10).
+on:
+  schedule:
+    - cron: '0 6 * * *' # 03h em horário de Brasília (UTC-3)
+  workflow_dispatch: # permite disparo manual para teste
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Backup do banco na VPS
+        shell: bash
+        env:
+          # Mesmos secrets do deploy.yml — VPS compartilhada com o manicure.
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_PORT: ${{ secrets.VPS_PORT || 22 }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          if ! printf '%s' "$VPS_SSH_KEY" | base64 -d > ~/.ssh/deploy_key; then
+            echo "❌ Falha ao decodificar VPS_SSH_KEY (deve conter BASE64 da chave privada)."
+            exit 1
+          fi
+
+          sed -i 's/\r$//' ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null || { echo "❌ VPS_SSH_KEY inválida"; exit 1; }
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+          # Heredoc com aspas em 'EOF': nada aqui precisa de variável do
+          # runner interpolada — tudo roda e resolve do lado remoto.
+          ssh -i ~/.ssh/deploy_key -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" << 'EOF'
+            set -e
+            exec > >(tee -a ~/banking/backup-scheduled.log) 2>&1
+            echo "=== Backup agendado $(date '+%Y-%m-%d %H:%M:%S') ==="
+            cd ~/banking/docker
+
+            if ! docker-compose ps postgres 2>/dev/null | grep -q "Up"; then
+              echo "❌ postgres não está no ar — nada para fazer backup"
+              exit 1
+            fi
+
+            mkdir -p backups
+            docker run --rm -v "$(pwd)/backups:/backups" alpine chmod 777 /backups
+
+            echo "▶ Criando backup..."
+            docker-compose exec -T postgres /backup.sh < /dev/null
+
+            echo "▶ Enviando backup para Google Drive..."
+            LATEST_BACKUP=$(ls -t backups/*.sql.gz 2>/dev/null | head -1)
+            if [ -z "$LATEST_BACKUP" ]; then
+              echo "❌ backup.sh rodou mas nenhum arquivo .sql.gz foi encontrado"
+              exit 1
+            fi
+            if command -v rclone &>/dev/null && rclone listremotes 2>/dev/null | grep -q '^gdrive:'; then
+              rclone copy "$LATEST_BACKUP" gdrive:banking-backups/ --log-level INFO
+              echo "✓ Backup enviado: $(basename "$LATEST_BACKUP")"
+              rclone delete gdrive:banking-backups/ --min-age 30d --log-level INFO || true
+            else
+              echo "❌ rclone não configurado — backup ficou só local, sem cópia remota"
+              exit 1
+            fi
+
+            echo "✓ Backup agendado concluído!"
+          EOF
+
+      - name: Notify by email on failure
+        if: failure()
+        # Mesmos secrets SMTP do deploy.yml.
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "❌ Backup agendado falhou: ${{ github.repository }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: ${{ secrets.MAIL_FROM }}
+          secure: false
+          body: |
+            O backup diário agendado do banco de dados falhou.
+
+            Repositório: ${{ github.repository }}
+            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            O banking guarda checkouts, assinaturas, cupons e tokens de
+            cartão — verifique quando foi o último backup bem-sucedido
+            antes que a defasagem fique grande demais.
