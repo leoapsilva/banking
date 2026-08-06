@@ -122,9 +122,50 @@ Quando `status == "PAID"`, o response de `GET /v1/checkouts/{id}` inclui:
 `paid_amount_cents` pode ser maior que `amount_cents` quando há juros de
 parcelamento e a operadora repassa esse custo ao comprador.
 
+### Confirmação ativa sem esperar o webhook (InfinitePay)
+
+`POST /v1/checkouts/infinitepay/confirm` — chame isto na página de retorno do
+comprador, em vez de confiar nos query params do `redirect_url` (eles podem
+ser editados por qualquer um):
+
+```
+POST /v1/checkouts/infinitepay/confirm
+{ "order_nsu": "abc123", "slug": "euHHRWPPfE",
+  "transaction_nsu": "816fc801-3113-4d70-b002-cf9b517b4044",
+  "receipt_url": "https://recibo.infinitepay.io/816fc801-..." }
+
+← 200 { "status": "ACTIVATED" | "ALREADY_PAID" | "NOT_PAID_YET" }
+← 404 { "error": "checkout not found" }   — order_nsu não corresponde a nenhum checkout nosso
+```
+
+O banking chama a InfinitePay (`payment_check`) do lado do servidor antes de
+ativar qualquer coisa — o corpo da requisição é só um roteiro de
+identificadores, nunca uma prova de pagamento.
+
+⚠️ **`slug` e `transaction_nsu` só existem depois de uma tentativa de
+pagamento** (via webhook ou via este mesmo redirect) — não há como consultar
+um checkout que nunca recebeu nenhum dos dois. Confirmado em produção em
+05/08/2026: `payment_check` com só `order_nsu` responde `{"success":false}`,
+não um sinal de "não pago". Por isso o webhook continua sendo obrigatório,
+não apenas preferencial — este endpoint acelera a confirmação quando o
+comprador volta pelo navegador, mas não substitui o webhook.
+
 ---
 
 ## Fluxo de assinaturas
+
+### Listar planos ativos
+
+```
+GET /v1/plans
+← 200 { "plans": [
+    { "code": "cores-annual", "description": "Cores Anual", "frequency": "ANNUAL",
+      "amount_cents": 29990, "currency": "BRL" }
+  ] }
+```
+
+Use isto para renderizar a página de preços sem hardcodar código/valor de
+plano — o preço exibido vem sempre daqui, nunca de uma constante no seu lado.
 
 ### Plano mensal InfinitePay (via link pré-criado)
 

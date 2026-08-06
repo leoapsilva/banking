@@ -70,3 +70,37 @@ func FromCreateLinkResponse(resp dto.CreateLinkResponse, orderNSU string) domain
 		Status:             domain.StatusCreated,
 	}
 }
+
+// ToPaymentCheckRequest builds the InfinitePay POST /payment_check body.
+// handle is injected from config, like ToCreateLinkRequest.
+func ToPaymentCheckRequest(handle string, req domain.CheckPaymentRequest) dto.PaymentCheckRequest {
+	return dto.PaymentCheckRequest{
+		Handle:         handle,
+		OrderNSU:       req.ProviderCheckoutID,
+		Slug:           req.Slug,
+		TransactionNSU: req.TransactionNSU,
+	}
+}
+
+// FromPaymentCheckResponse builds the unified CheckoutDetails from
+// InfinitePay's POST /payment_check response.
+//
+// currency defaults to "BRL" because payment_check's response carries no
+// currency field — every checkout in this system is BRL today (both C6 and
+// InfinitePay); this mapper would need a currency parameter the day that
+// changes.
+func FromPaymentCheckResponse(resp dto.PaymentCheckResponse, providerCheckoutID string) domain.CheckoutDetails {
+	details := domain.CheckoutDetails{
+		ProviderCheckoutID: providerCheckoutID,
+		Amount:             domain.Money{AmountCents: resp.Amount, Currency: "BRL"},
+	}
+	if !resp.Paid {
+		details.Status = domain.StatusCreated
+		return details
+	}
+	details.Status = domain.StatusPaid
+	details.PaidAmount = &domain.Money{AmountCents: resp.PaidAmount, Currency: "BRL"}
+	details.CaptureMethod = resp.CaptureMethod
+	details.Installments = resp.Installments
+	return details
+}

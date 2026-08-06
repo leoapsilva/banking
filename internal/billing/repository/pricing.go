@@ -33,6 +33,37 @@ func (r *Repository) GetPlan(ctx context.Context, code string) (domain.Plan, err
 	return p, nil
 }
 
+// ListActivePlans loads every active plan, cheapest first, so a storefront
+// can render a price list without knowing plan codes in advance.
+func (r *Repository) ListActivePlans(ctx context.Context) ([]domain.Plan, error) {
+	const q = `
+		SELECT code, description, frequency, amount_cents, currency, active
+		FROM billing_plans
+		WHERE active
+		ORDER BY amount_cents ASC`
+
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("billing: list plans: %w", err)
+	}
+	defer rows.Close()
+
+	var plans []domain.Plan
+	for rows.Next() {
+		var p domain.Plan
+		var freq string
+		if err := rows.Scan(&p.Code, &p.Description, &freq, &p.Amount.AmountCents, &p.Amount.Currency, &p.Active); err != nil {
+			return nil, fmt.Errorf("billing: scan plan: %w", err)
+		}
+		p.Frequency = domain.Frequency(freq)
+		plans = append(plans, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("billing: list plans: %w", err)
+	}
+	return plans, nil
+}
+
 // GetCoupon loads a coupon by code. Unknown codes return
 // domain.ErrCouponNotFound. Validity is not checked here — that is the
 // domain's job (Coupon.Validate), so the rules stay testable without a DB.

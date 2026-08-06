@@ -158,6 +158,72 @@ func TestFromCreateLinkResponse(t *testing.T) {
 	}
 }
 
+func TestToPaymentCheckRequest(t *testing.T) {
+	req := domain.CheckPaymentRequest{
+		ProviderCheckoutID: "501OILUYHZ",
+		Slug:               "euHHRWPPfE",
+		TransactionNSU:     "816fc801-3113-4d70-b002-cf9b517b4044",
+	}
+	got := ToPaymentCheckRequest("cores-app-br", req)
+
+	if got.Handle != "cores-app-br" {
+		t.Errorf("Handle = %q, want %q", got.Handle, "cores-app-br")
+	}
+	if got.OrderNSU != "501OILUYHZ" {
+		t.Errorf("OrderNSU = %q, want %q", got.OrderNSU, "501OILUYHZ")
+	}
+	if got.Slug != "euHHRWPPfE" {
+		t.Errorf("Slug = %q, want %q", got.Slug, "euHHRWPPfE")
+	}
+	if got.TransactionNSU != "816fc801-3113-4d70-b002-cf9b517b4044" {
+		t.Errorf("TransactionNSU = %q, want %q", got.TransactionNSU, "816fc801-3113-4d70-b002-cf9b517b4044")
+	}
+}
+
+// Real response captured 05/08/2026 against production for a paid checkout.
+func TestFromPaymentCheckResponse_Paid(t *testing.T) {
+	capture := "pix"
+	installments := 1
+	resp := dto.PaymentCheckResponse{
+		Success:       true,
+		Paid:          true,
+		Amount:        100,
+		PaidAmount:    100,
+		Installments:  &installments,
+		CaptureMethod: &capture,
+	}
+	got := FromPaymentCheckResponse(resp, "C5HMHZ5QG9")
+
+	if got.ProviderCheckoutID != "C5HMHZ5QG9" {
+		t.Errorf("ProviderCheckoutID = %q, want %q", got.ProviderCheckoutID, "C5HMHZ5QG9")
+	}
+	if got.Status != domain.StatusPaid {
+		t.Errorf("Status = %q, want %q", got.Status, domain.StatusPaid)
+	}
+	if got.PaidAmount == nil || got.PaidAmount.AmountCents != 100 {
+		t.Errorf("PaidAmount = %+v, want AmountCents=100", got.PaidAmount)
+	}
+	if got.CaptureMethod == nil || *got.CaptureMethod != "pix" {
+		t.Errorf("CaptureMethod = %v, want %q", got.CaptureMethod, "pix")
+	}
+	if got.Installments == nil || *got.Installments != 1 {
+		t.Errorf("Installments = %v, want 1", got.Installments)
+	}
+}
+
+// Real response captured 05/08/2026 for a checkout that was never paid.
+func TestFromPaymentCheckResponse_NotPaid(t *testing.T) {
+	resp := dto.PaymentCheckResponse{Success: true, Paid: false, Amount: 0, PaidAmount: 0}
+	got := FromPaymentCheckResponse(resp, "C5HMHZ5QG9")
+
+	if got.Status != domain.StatusCreated {
+		t.Errorf("Status = %q, want %q (not paid)", got.Status, domain.StatusCreated)
+	}
+	if got.PaidAmount != nil {
+		t.Errorf("PaidAmount = %+v, want nil for an unpaid checkout", got.PaidAmount)
+	}
+}
+
 // Even if InfinitePay starts returning a slug in the future, order_nsu must
 // still win: the webhook only ever echoes back order_nsu, so using anything
 // else as ProviderCheckoutID would make correlation impossible regardless

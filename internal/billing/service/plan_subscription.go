@@ -141,6 +141,12 @@ func (s *Service) GetSubscription(ctx context.Context, id uuid.UUID) (domain.Sub
 	return s.repo.GetByID(ctx, id)
 }
 
+// ListPlans returns every active plan, cheapest first, so a storefront can
+// render a price list without hardcoding plan codes.
+func (s *Service) ListPlans(ctx context.Context) ([]domain.Plan, error) {
+	return s.repo.ListActivePlans(ctx)
+}
+
 // ValidateCoupon checks a coupon against a plan without creating anything, so
 // a storefront can show the discount before the buyer commits.
 func (s *Service) ValidateCoupon(ctx context.Context, planCode, couponCode string) (domain.PricedCharge, error) {

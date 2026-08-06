@@ -18,5 +18,11 @@ type Provider interface {
 	Create(ctx context.Context, req domain.CreateCheckoutRequest) (domain.CheckoutResult, error)
 	Authorize(ctx context.Context, req domain.AuthorizeRequest) (domain.AuthorizeResult, error)
 	Get(ctx context.Context, providerCheckoutID string) (domain.CheckoutDetails, error)
+	// CheckPayment actively confirms payment status using identifiers that
+	// only exist after a payment attempt (see domain.CheckPaymentRequest).
+	// Providers whose Get() already offers live status (e.g. C6) return
+	// ErrNotSupported here — this exists for InfinitePay, whose Get() is
+	// DB-first/webhook-driven and cannot answer this on demand.
+	CheckPayment(ctx context.Context, req domain.CheckPaymentRequest) (domain.CheckoutDetails, error)
 	Cancel(ctx context.Context, providerCheckoutID string) error
 }

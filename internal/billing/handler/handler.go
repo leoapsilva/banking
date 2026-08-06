@@ -23,7 +23,12 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// Preferred contract: the caller names a plan, billing prices it.
 	mux.HandleFunc("POST /v1/subscriptions", h.createFromPlan)
 	mux.HandleFunc("GET /v1/subscriptions/{id}", h.get)
+	mux.HandleFunc("GET /v1/plans", h.listPlans)
 	mux.HandleFunc("GET /v1/coupons/{code}/validate", h.validateCoupon)
+
+	// Confirms a payment using identifiers the buyer's redirect carries back
+	// — never the redirect's own claim of "paid". See confirm_handler.go.
+	mux.HandleFunc("POST /v1/checkouts/infinitepay/confirm", h.confirmInfinitePayPayment)
 
 	// Amount-carrying endpoints, kept for the existing C6 flows.
 	mux.HandleFunc("POST /v1/subscriptions/monthly", h.createMonthly)

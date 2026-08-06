@@ -97,6 +97,24 @@ func (s *Service) GetCheckout(ctx context.Context, baas domain.BaaS, providerChe
 	return details, nil
 }
 
+// CheckPayment asks the selected provider to actively confirm payment
+// status (see domain.CheckPaymentRequest). Unlike GetCheckout, it does not
+// fall back to the repository on ErrNotSupported: a caller reaching for
+// this method specifically wants a fresh provider-side confirmation, and
+// silently returning stale local state would defeat that.
+func (s *Service) CheckPayment(ctx context.Context, baas domain.BaaS, req domain.CheckPaymentRequest) (domain.CheckoutDetails, error) {
+	provider, err := s.resolveProvider(baas)
+	if err != nil {
+		return domain.CheckoutDetails{}, err
+	}
+
+	details, err := provider.CheckPayment(ctx, req)
+	if err != nil {
+		return domain.CheckoutDetails{}, fmt.Errorf("checkout: check payment via provider: %w", err)
+	}
+	return details, nil
+}
+
 // rowToCheckoutDetails converts a repository row to the domain details shape,
 // used for DB-first providers (InfinitePay) where Get() is not available.
 func rowToCheckoutDetails(row repository.Checkout) domain.CheckoutDetails {

@@ -45,6 +45,31 @@ type CreateLinkResponse struct {
 	Slug string `json:"slug"`
 }
 
+// PaymentCheckRequest is the body for POST /payment_check. Slug and
+// TransactionNSU only exist after a payment attempt (via webhook or the
+// buyer's redirect back) — they cannot be supplied at link-creation time.
+type PaymentCheckRequest struct {
+	Handle         string `json:"handle"`
+	OrderNSU       string `json:"order_nsu"`
+	Slug           string `json:"slug"`
+	TransactionNSU string `json:"transaction_nsu"`
+}
+
+// PaymentCheckResponse is returned by POST /payment_check.
+//
+// Success is false when the request itself is malformed (e.g. missing
+// slug/transaction_nsu) — verified against a real call in production on
+// 05/08/2026. It is NOT a signal that the payment was not made; "paid" is
+// that signal, and it is only meaningful when Success is true.
+type PaymentCheckResponse struct {
+	Success       bool    `json:"success"`
+	Paid          bool    `json:"paid"`
+	Amount        int64   `json:"amount"`
+	PaidAmount    int64   `json:"paid_amount"`
+	Installments  *int    `json:"installments"`
+	CaptureMethod *string `json:"capture_method"`
+}
+
 // WebhookPayload is the body InfinitePay POSTs to our webhook_url when a
 // payment is approved. InfinitePay only fires this webhook on success, so
 // receiving it is sufficient proof of payment (status is implicitly PAID).

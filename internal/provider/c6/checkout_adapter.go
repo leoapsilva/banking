@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 
+	checkoutfeature "github.com/upwifi/banking/internal/checkout"
 	checkoutdomain "github.com/upwifi/banking/internal/checkout/domain"
 	"github.com/upwifi/banking/internal/provider/c6/client"
 	"github.com/upwifi/banking/internal/provider/c6/dto"
@@ -52,6 +53,12 @@ func (a *CheckoutAdapter) Get(ctx context.Context, providerCheckoutID string) (c
 		return checkoutdomain.CheckoutDetails{}, err
 	}
 	return mapper.FromC6GetCheckoutResponse(resp), nil
+}
+
+// CheckPayment is not needed: Get already provides live status from C6, so
+// there is no separate active-confirmation call to make.
+func (a *CheckoutAdapter) CheckPayment(_ context.Context, _ checkoutdomain.CheckPaymentRequest) (checkoutdomain.CheckoutDetails, error) {
+	return checkoutdomain.CheckoutDetails{}, checkoutfeature.ErrNotSupported
 }
 
 func (a *CheckoutAdapter) Cancel(ctx context.Context, providerCheckoutID string) error {

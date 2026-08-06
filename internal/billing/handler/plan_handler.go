@@ -62,6 +62,30 @@ func (h *Handler) createFromPlan(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// listPlans lets a storefront render a price list without hardcoding plan
+// codes — the amount displayed always comes from here, never from the
+// caller (RN-02 in the Cores REFINAMENTO: the Cores app never calculates
+// price).
+func (h *Handler) listPlans(w http.ResponseWriter, r *http.Request) {
+	plans, err := h.svc.ListPlans(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+
+	body := make([]map[string]any, 0, len(plans))
+	for _, p := range plans {
+		body = append(body, map[string]any{
+			"code":         p.Code,
+			"description":  p.Description,
+			"frequency":    string(p.Frequency),
+			"amount_cents": p.Amount.AmountCents,
+			"currency":     p.Amount.Currency,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"plans": body})
+}
+
 // get exposes the subscription state so an API client can mirror it instead
 // of maintaining a parallel state machine.
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {

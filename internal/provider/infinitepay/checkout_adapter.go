@@ -6,6 +6,7 @@ package infinitepay
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	checkoutfeature "github.com/upwifi/banking/internal/checkout"
@@ -50,6 +51,24 @@ func (a *CheckoutAdapter) Authorize(_ context.Context, _ checkoutdomain.Authoriz
 // (updated by the InfinitePay inbound webhook) when it receives this error.
 func (a *CheckoutAdapter) Get(_ context.Context, _ string) (checkoutdomain.CheckoutDetails, error) {
 	return checkoutdomain.CheckoutDetails{}, checkoutfeature.ErrNotSupported
+}
+
+// CheckPayment confirms payment status via POST /payment_check — the only
+// way to learn about a payment when the webhook has not (yet) arrived and
+// the buyer has not (yet) returned via redirect. It requires Slug and
+// TransactionNSU (see domain.CheckPaymentRequest), so it cannot recover a
+// checkout for which neither has ever been captured — it is a targeted
+// confirmation, not a general-purpose status poll.
+func (a *CheckoutAdapter) CheckPayment(ctx context.Context, req checkoutdomain.CheckPaymentRequest) (checkoutdomain.CheckoutDetails, error) {
+	body := mapper.ToPaymentCheckRequest(a.handle, req)
+	var resp dto.PaymentCheckResponse
+	if err := a.client.Do(ctx, http.MethodPost, "/payment_check", body, &resp); err != nil {
+		return checkoutdomain.CheckoutDetails{}, err
+	}
+	if !resp.Success {
+		return checkoutdomain.CheckoutDetails{}, fmt.Errorf("infinitepay: payment_check rejected the request (missing or invalid identifiers)")
+	}
+	return mapper.FromPaymentCheckResponse(resp, req.ProviderCheckoutID), nil
 }
 
 // Cancel is not supported: InfinitePay has no cancel-link API.

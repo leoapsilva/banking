@@ -36,6 +36,13 @@ type PaymentGateway interface {
 
 	// CancelCheckout aborts a pending hosted checkout at the provider.
 	CancelCheckout(ctx context.Context, baas checkoutdomain.BaaS, providerCheckoutID string) error
+
+	// CheckPayment actively confirms payment status using identifiers a
+	// buyer's redirect carries back — see checkoutdomain.CheckPaymentRequest.
+	// Not every provider supports this; ErrNotSupported bubbles up unchanged
+	// for billing to handle (or, today, simply for InfinitePay-only callers
+	// never to hit).
+	CheckPayment(ctx context.Context, baas checkoutdomain.BaaS, req checkoutdomain.CheckPaymentRequest) (checkoutdomain.CheckoutDetails, error)
 }
 
 // CheckoutStore is the outbound port billing uses to read and annotate the

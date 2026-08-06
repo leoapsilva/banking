@@ -150,6 +150,22 @@ type AuthorizeResult struct {
 	SavedCardToken     *string // populated when SaveCard was requested and approved
 }
 
+// CheckPaymentRequest asks a provider to actively confirm whether a checkout
+// was paid, using identifiers the buyer's browser carries back on redirect
+// (or that a webhook already delivered). Only InfinitePay supports this
+// (via POST /payment_check); C6 already supports the richer Get(), so its
+// adapter returns ErrNotSupported here instead.
+//
+// Slug and TransactionNSU only exist after a payment attempt — never at
+// checkout creation time — and the caller typically reads them from an
+// untrusted redirect query string. It is the provider call itself, not
+// their mere presence, that confirms payment.
+type CheckPaymentRequest struct {
+	ProviderCheckoutID string // order_nsu
+	Slug               string
+	TransactionNSU     string
+}
+
 // CheckoutDetails is the full state of a checkout as returned by a GET.
 type CheckoutDetails struct {
 	ProviderCheckoutID string
