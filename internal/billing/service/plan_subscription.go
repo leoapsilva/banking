@@ -77,6 +77,7 @@ func (s *Service) CreateFromPlan(ctx context.Context, req CreateFromPlanRequest)
 			CustomerTaxID: req.CustomerTaxID,
 			CustomerEmail: req.CustomerEmail,
 			Amount:        priced.Amount,
+			Description:   plan.Description,
 			RedirectURL:   req.RedirectURL,
 		})
 	case domain.FrequencyMonthly:

@@ -178,6 +178,20 @@ func withOrderNSU(redirectURL, orderNSU string) string {
 	return u.String()
 }
 
+// checkoutDescriptionOrDefault decides what InfinitePay shows as the
+// product name on its hosted checkout page and in the buyer's e-mail
+// receipt. Should come from the plan's own catalogue description
+// (billing_plans.description) — a generic "Assinatura anual" with no
+// company name told the buyer nothing when they later looked at their
+// receipt. Falls back to that same generic text only if the caller
+// doesn't supply one.
+func checkoutDescriptionOrDefault(planDescription string) string {
+	if planDescription == "" {
+		return "Assinatura anual"
+	}
+	return planDescription
+}
+
 // CreateAnnualCheckoutRequest creates an annual subscription via a hosted
 // checkout link (InfinitePay model). No installments or card parameters are
 // sent — the buyer decides how to pay on the InfinitePay-hosted page.
@@ -187,7 +201,14 @@ type CreateAnnualCheckoutRequest struct {
 	CustomerTaxID string
 	CustomerEmail string
 	Amount        checkoutdomain.Money
-	RedirectURL   string
+	// Description is what InfinitePay shows as the product name on its
+	// hosted checkout page and in the buyer's e-mail receipt. Should come
+	// from the plan's own catalogue description (billing_plans.description)
+	// — a generic "Assinatura anual" with no company name told the buyer
+	// nothing when they later looked at their receipt. Falls back to that
+	// same generic text only if the caller doesn't supply one.
+	Description string
+	RedirectURL string
 }
 
 // CreateAnnualCheckout creates an annual subscription backed by a single
@@ -209,12 +230,14 @@ func (s *Service) CreateAnnualCheckout(ctx context.Context, req CreateAnnualChec
 		return checkoutdomain.CheckoutResult{}, uuid.Nil, fmt.Errorf("subscription: persist: %w", err)
 	}
 
+	description := checkoutDescriptionOrDefault(req.Description)
+
 	externalRef := idgen.ExternalReferenceID(subID.String(), "annual")
 	result, err := s.checkoutSvc.CreateCheckout(ctx, checkoutdomain.CreateCheckoutRequest{
 		BaaS:                req.BaaS,
 		ExternalReferenceID: externalRef,
 		Amount:              req.Amount,
-		Description:         "Assinatura anual",
+		Description:         description,
 		Payer: &checkoutdomain.Payer{
 			Name: req.CustomerName, TaxID: req.CustomerTaxID, Email: req.CustomerEmail,
 		},

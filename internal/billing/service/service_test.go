@@ -51,3 +51,28 @@ func TestWithOrderNSU_InvalidURLReturnsUnchanged(t *testing.T) {
 		t.Errorf("withOrderNSU(%q, ...) = %q, want unchanged %q", invalid, got, invalid)
 	}
 }
+
+// TestCheckoutDescriptionOrDefault is the regression for a real complaint:
+// buyers got a receipt e-mail saying just "Assinatura anual", with no
+// mention of Cores — the plan's own catalogue description
+// (billing_plans.description, e.g. "Cores — plano anual") must be what
+// InfinitePay shows, not a generic hardcoded string.
+func TestCheckoutDescriptionOrDefault(t *testing.T) {
+	cases := []struct {
+		name            string
+		planDescription string
+		want            string
+	}{
+		{name: "uses plan description when present", planDescription: "Cores — plano anual", want: "Cores — plano anual"},
+		{name: "falls back to generic text when empty", planDescription: "", want: "Assinatura anual"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := checkoutDescriptionOrDefault(tc.planDescription)
+			if got != tc.want {
+				t.Errorf("checkoutDescriptionOrDefault(%q) = %q, want %q", tc.planDescription, got, tc.want)
+			}
+		})
+	}
+}
