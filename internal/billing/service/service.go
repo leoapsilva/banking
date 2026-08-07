@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
@@ -160,6 +161,23 @@ func (s *Service) CreateAnnualInstallment(ctx context.Context, req CreateAnnualI
 	return result, subID, nil
 }
 
+// withOrderNSU appends order_nsu to a redirect URL so the page the buyer
+// lands on after paying can identify the checkout — InfinitePay's own
+// redirect never includes it (confirmed against a live payment: only
+// transaction_id/transaction_nsu/capture_method come back). Falls back to
+// the original URL unchanged if it doesn't parse, rather than failing
+// checkout creation over a cosmetic concern.
+func withOrderNSU(redirectURL, orderNSU string) string {
+	u, err := url.Parse(redirectURL)
+	if err != nil {
+		return redirectURL
+	}
+	q := u.Query()
+	q.Set("order_nsu", orderNSU)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 // CreateAnnualCheckoutRequest creates an annual subscription via a hosted
 // checkout link (InfinitePay model). No installments or card parameters are
 // sent — the buyer decides how to pay on the InfinitePay-hosted page.
@@ -191,16 +209,22 @@ func (s *Service) CreateAnnualCheckout(ctx context.Context, req CreateAnnualChec
 		return checkoutdomain.CheckoutResult{}, uuid.Nil, fmt.Errorf("subscription: persist: %w", err)
 	}
 
+	externalRef := idgen.ExternalReferenceID(subID.String(), "annual")
 	result, err := s.checkoutSvc.CreateCheckout(ctx, checkoutdomain.CreateCheckoutRequest{
 		BaaS:                req.BaaS,
-		ExternalReferenceID: idgen.ExternalReferenceID(subID.String(), "annual"),
+		ExternalReferenceID: externalRef,
 		Amount:              req.Amount,
 		Description:         "Assinatura anual",
 		Payer: &checkoutdomain.Payer{
 			Name: req.CustomerName, TaxID: req.CustomerTaxID, Email: req.CustomerEmail,
 		},
 		// No Card — buyer chooses payment method (Pix, card up to 12x) on the hosted page.
-		RedirectURL: req.RedirectURL,
+		//
+		// order_nsu vai embutido aqui, não confiado a InfinitePay: o redirect
+		// real deles carrega só transaction_id/transaction_nsu/capture_method,
+		// nunca order_nsu (confirmado com pagamento real) — sem isso, a
+		// página de retorno não teria como saber qual checkout localizar.
+		RedirectURL: withOrderNSU(req.RedirectURL, externalRef),
 	})
 	if err != nil {
 		return checkoutdomain.CheckoutResult{}, uuid.Nil, fmt.Errorf("subscription: create annual checkout: %w", err)

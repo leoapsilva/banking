@@ -63,14 +63,68 @@ func (f *fakePaymentGateway) CheckPayment(ctx context.Context, baas checkoutdoma
 	return f.checkPayment(ctx, baas, req)
 }
 
-func TestConfirmInfinitePayPayment_MissingIdentifiersRejected(t *testing.T) {
+func TestConfirmInfinitePayPayment_MissingOrderNSURejected(t *testing.T) {
 	svc := New(nil, &fakeCheckoutStore{}, &fakePaymentGateway{})
 
-	_, err := svc.ConfirmInfinitePayPayment(context.Background(), ConfirmInfinitePayPaymentRequest{
+	_, err := svc.ConfirmInfinitePayPayment(context.Background(), ConfirmInfinitePayPaymentRequest{})
+	if err == nil {
+		t.Fatal("expected an error when order_nsu is missing")
+	}
+}
+
+// Slug/TransactionNSU are genuinely optional: InfinitePay's real redirect
+// never carries them (confirmed against a live payment), so this is the
+// common case in production, not an edge case. It must fail soft —
+// NOT_PAID_YET — and never call the provider, which the webhook (which
+// does receive slug) is what actually activates.
+func TestConfirmInfinitePayPayment_MissingSlugOrTransactionNSU_NotPaidYet(t *testing.T) {
+	providerCalled := false
+	store := &fakeCheckoutStore{
+		getByProviderID: func(context.Context, checkoutdomain.BaaS, string) (checkoutrepo.Checkout, error) {
+			return checkoutrepo.Checkout{Status: checkoutdomain.StatusCreated}, nil
+		},
+	}
+	gateway := &fakePaymentGateway{
+		checkPayment: func(context.Context, checkoutdomain.BaaS, checkoutdomain.CheckPaymentRequest) (checkoutdomain.CheckoutDetails, error) {
+			providerCalled = true
+			return checkoutdomain.CheckoutDetails{}, nil
+		},
+	}
+	svc := New(nil, store, gateway)
+
+	result, err := svc.ConfirmInfinitePayPayment(context.Background(), ConfirmInfinitePayPaymentRequest{
 		OrderNSU: "ORDER-1", // missing Slug and TransactionNSU
 	})
-	if err == nil {
-		t.Fatal("expected an error when slug/transaction_nsu are missing")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != ConfirmationNotPaidYet {
+		t.Errorf("result = %q, want %q", result, ConfirmationNotPaidYet)
+	}
+	if providerCalled {
+		t.Error("payment_check should not be called without slug/transaction_nsu")
+	}
+}
+
+// Even without slug/transaction_nsu, a checkout the webhook already marked
+// PAID must short-circuit to ALREADY_PAID — this is in fact the expected
+// steady state in production, since the webhook usually beats the redirect.
+func TestConfirmInfinitePayPayment_AlreadyPaidWithoutSlug(t *testing.T) {
+	store := &fakeCheckoutStore{
+		getByProviderID: func(context.Context, checkoutdomain.BaaS, string) (checkoutrepo.Checkout, error) {
+			return checkoutrepo.Checkout{Status: checkoutdomain.StatusPaid}, nil
+		},
+	}
+	svc := New(nil, store, &fakePaymentGateway{})
+
+	result, err := svc.ConfirmInfinitePayPayment(context.Background(), ConfirmInfinitePayPaymentRequest{
+		OrderNSU: "ORDER-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != ConfirmationAlreadyPaid {
+		t.Errorf("result = %q, want %q", result, ConfirmationAlreadyPaid)
 	}
 }
 

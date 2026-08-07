@@ -19,6 +19,15 @@ import (
 // TransactionNSU are handed to the provider's own payment_check endpoint,
 // which is the actual source of truth. ReceiptURL is display-only and is
 // never validated (it has no bearing on activation).
+//
+// Slug is optional in practice, not just in principle: InfinitePay's real
+// redirect (confirmed against a live payment) carries only transaction_id/
+// transaction_nsu/capture_method — never slug, and never order_nsu either
+// (order_nsu has to be embedded in the redirect_url ourselves at checkout
+// creation, see CreateAnnualCheckout). Without Slug, payment_check cannot
+// be called, so this handler falls back to NOT_PAID_YET and lets the
+// webhook — which does receive slug — be the one to actually activate.
+// The redirect page polls and picks up ALREADY_PAID once it does.
 type ConfirmInfinitePayPaymentRequest struct {
 	OrderNSU       string
 	Slug           string
@@ -51,8 +60,8 @@ var ErrCheckoutNotFound = errors.New("billing: checkout not found for order_nsu"
 // reimplements activation logic or its fraud checks (payment amount,
 // order reference).
 func (s *Service) ConfirmInfinitePayPayment(ctx context.Context, req ConfirmInfinitePayPaymentRequest) (ConfirmationResult, error) {
-	if req.OrderNSU == "" || req.Slug == "" || req.TransactionNSU == "" {
-		return "", fmt.Errorf("billing: confirm payment: order_nsu, slug and transaction_nsu are all required")
+	if req.OrderNSU == "" {
+		return "", fmt.Errorf("billing: confirm payment: order_nsu is required")
 	}
 
 	checkoutRow, err := s.checkoutRepo.GetByProviderID(ctx, checkoutdomain.BaaSInfinitePay, req.OrderNSU)
@@ -63,6 +72,12 @@ func (s *Service) ConfirmInfinitePayPayment(ctx context.Context, req ConfirmInfi
 		// Idempotent: the webhook, a previous redirect, or the
 		// reconciliation job may have already activated this checkout.
 		return ConfirmationAlreadyPaid, nil
+	}
+	if req.Slug == "" || req.TransactionNSU == "" {
+		// Cannot call payment_check without them, and in practice they
+		// never arrive via redirect (see doc comment above) — the webhook
+		// is what will actually activate this checkout.
+		return ConfirmationNotPaidYet, nil
 	}
 
 	details, err := s.checkoutSvc.CheckPayment(ctx, checkoutdomain.BaaSInfinitePay, checkoutdomain.CheckPaymentRequest{

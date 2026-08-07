@@ -27,8 +27,8 @@ func (h *Handler) confirmInfinitePayPayment(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if p.OrderNSU == "" || p.Slug == "" || p.TransactionNSU == "" {
-		writeError(w, http.StatusBadRequest, "order_nsu, slug and transaction_nsu are all required")
+	if p.OrderNSU == "" {
+		writeError(w, http.StatusBadRequest, "order_nsu is required")
 		return
 	}
 
