@@ -27,6 +27,11 @@ var (
 	// reject zero-value charges anyway. Free access is a deliberate act, not
 	// the accidental result of arithmetic — see grantComplimentary.
 	ErrCouponExceedsPlan = errors.New("billing: coupon discount is not smaller than the plan price")
+
+	// ErrCouponCodeExists guards the UNIQUE constraint on billing_coupons.code
+	// — surfaced as 409 instead of a generic 502 so a caller generating codes
+	// (e.g. a per-signup coupon) can tell "pick another code" from "we're down".
+	ErrCouponCodeExists = errors.New("billing: coupon code already exists")
 )
 
 // Plan is a priced entry in the catalogue. The amount lives here rather than

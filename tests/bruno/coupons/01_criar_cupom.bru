@@ -1,0 +1,27 @@
+meta {
+  name: 01 Criar cupom (caso feliz)
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/v1/coupons
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "code": "0101TESTE30",
+    "percent_off": 30,
+    "applicable_frequencies": ["ANNUAL"],
+    "duration": "ONCE",
+    "max_redemptions": 1,
+    "valid_until": "2099-01-01T00:00:00Z"
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.code: eq 0101TESTE30
+}

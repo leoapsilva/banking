@@ -1,0 +1,22 @@
+meta {
+  name: 03 Criar cupom sem percent_off nem amount_off_cents deve falhar
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/v1/coupons
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "code": "0101SEMDESCONTO",
+    "applicable_frequencies": ["ANNUAL"]
+  }
+}
+
+assert {
+  res.status: eq 400
+}
