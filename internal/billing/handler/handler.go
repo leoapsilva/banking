@@ -25,6 +25,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/subscriptions/{id}", h.get)
 	mux.HandleFunc("GET /v1/plans", h.listPlans)
 	mux.HandleFunc("GET /v1/coupons/{code}/validate", h.validateCoupon)
+	mux.HandleFunc("POST /v1/coupons", h.createCoupon)
 
 	// Confirms a payment using identifiers the buyer's redirect carries back
 	// — never the redirect's own claim of "paid". See confirm_handler.go.

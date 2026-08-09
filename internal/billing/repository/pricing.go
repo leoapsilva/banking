@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/upwifi/banking/internal/billing/domain"
 )
@@ -92,6 +93,34 @@ func (r *Repository) GetCoupon(ctx context.Context, code string) (domain.Coupon,
 		c.ApplicableFrequencies = append(c.ApplicableFrequencies, domain.Frequency(f))
 	}
 	return c, nil
+}
+
+// CreateCoupon inserts a new coupon. Returns domain.ErrCouponCodeExists on a
+// duplicate code (billing_coupons.code is UNIQUE) instead of a generic error,
+// so a caller that generates codes itself (e.g. one per signup) can retry
+// with a different code rather than surfacing a 502.
+func (r *Repository) CreateCoupon(ctx context.Context, c domain.Coupon) error {
+	const q = `
+		INSERT INTO billing_coupons (code, percent_off, amount_off_cents, applicable_frequencies, duration, valid_from, valid_until, max_redemptions)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+
+	freqs := make([]string, len(c.ApplicableFrequencies))
+	for i, f := range c.ApplicableFrequencies {
+		freqs[i] = string(f)
+	}
+
+	_, err := r.pool.Exec(ctx, q,
+		c.Code, c.PercentOff, c.AmountOffCents, freqs, string(c.Duration),
+		c.ValidFrom, c.ValidUntil, c.MaxRedemptions,
+	)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.ErrCouponCodeExists
+		}
+		return fmt.Errorf("billing: create coupon: %w", err)
+	}
+	return nil
 }
 
 // RedeemCoupon increments the redemption counter, refusing to exceed

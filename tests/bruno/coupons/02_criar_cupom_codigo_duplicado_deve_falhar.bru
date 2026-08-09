@@ -1,0 +1,24 @@
+meta {
+  name: 02 Criar cupom com código duplicado deve falhar
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/v1/coupons
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "code": "0101TESTE30",
+    "percent_off": 50,
+    "applicable_frequencies": ["ANNUAL"],
+    "duration": "ONCE"
+  }
+}
+
+assert {
+  res.status: eq 409
+}
