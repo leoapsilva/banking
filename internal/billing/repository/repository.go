@@ -57,7 +57,7 @@ func (r *Repository) ActivateWithToken(ctx context.Context, id, cardTokenID uuid
 
 func (r *Repository) Complete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE subscriptions SET status = $1, next_charge_date = NULL, updated_at = now() WHERE id = $2
+		UPDATE subscriptions SET status = $1, next_charge_date = NULL, paid_at = now(), updated_at = now() WHERE id = $2
 	`, domain.StatusCompleted, id)
 	return err
 }
@@ -76,7 +76,7 @@ func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (domain.Subscrip
 		SELECT s.id, s.baas, s.customer_tax_id, s.customer_name, COALESCE(s.customer_email,''),
 			s.amount_cents, s.currency, s.frequency, s.installments_total, s.installments_done,
 			s.interest_type, s.card_token_id, s.initial_checkout_id, s.status, s.next_charge_date,
-			s.consecutive_failures
+			s.consecutive_failures, s.paid_at
 		FROM subscriptions s WHERE s.id = $1
 	`, id)
 	s, err := scanSubscription(row)
@@ -93,7 +93,7 @@ func scanSubscription(row pgx.Row) (domain.Subscription, error) {
 		&s.ID, &s.BaaS, &s.CustomerTaxID, &s.CustomerName, &s.CustomerEmail,
 		&s.Amount.AmountCents, &s.Amount.Currency, &s.Frequency, &s.InstallmentsTotal, &s.InstallmentsDone,
 		&interestType, &s.CardTokenID, &s.InitialCheckoutID, &s.Status, &s.NextChargeDate,
-		&s.ConsecutiveFailures,
+		&s.ConsecutiveFailures, &s.PaidAt,
 	)
 	if interestType != nil {
 		it := checkoutdomain.InterestType(*interestType)
@@ -109,7 +109,7 @@ func (r *Repository) FindByInitialCheckoutID(ctx context.Context, checkoutID uui
 		SELECT id, baas, customer_tax_id, customer_name, COALESCE(customer_email,''),
 			amount_cents, currency, frequency, installments_total, installments_done,
 			interest_type, card_token_id, initial_checkout_id, status, next_charge_date,
-			consecutive_failures
+			consecutive_failures, paid_at
 		FROM subscriptions WHERE initial_checkout_id = $1
 	`, checkoutID)
 	s, err := scanSubscription(row)
@@ -131,7 +131,7 @@ func (r *Repository) DueForCharge(ctx context.Context, now time.Time) ([]domain.
 		SELECT id, baas, customer_tax_id, customer_name, COALESCE(customer_email,''),
 			amount_cents, currency, frequency, installments_total, installments_done,
 			interest_type, card_token_id, initial_checkout_id, status, next_charge_date,
-			consecutive_failures
+			consecutive_failures, paid_at
 		FROM subscriptions
 		WHERE status = $1 AND next_charge_date <= $2
 		  -- Courtesy subscriptions are never charged. Granting one already
