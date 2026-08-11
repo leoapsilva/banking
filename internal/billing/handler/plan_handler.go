@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -111,6 +112,9 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	if sub.NextChargeDate != nil {
 		body["next_charge_date"] = sub.NextChargeDate.Format("2006-01-02")
+	}
+	if periodEnd := sub.CurrentPeriodEnd(); periodEnd != nil {
+		body["current_period_end"] = periodEnd.Format(time.RFC3339)
 	}
 	writeJSON(w, http.StatusOK, body)
 }

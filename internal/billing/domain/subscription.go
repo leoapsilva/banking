@@ -53,6 +53,24 @@ type Subscription struct {
 	ConsecutiveFailures int
 	CancelledAt         *time.Time
 	CancelledReason     string
+
+	// PaidAt is set by Complete() — the instant an ANNUAL subscription was
+	// actually paid. nil for anything that never reached COMPLETED. Callers
+	// derive how long the paid access is valid from this, instead of
+	// treating COMPLETED as unconditional, permanent access.
+	PaidAt *time.Time
+}
+
+// CurrentPeriodEnd reports until when access paid for this subscription is
+// valid, or nil when that is not applicable/known — MONTHLY subscriptions
+// bill on NextChargeDate instead, and an ANNUAL subscription never marked
+// paid has nothing to derive a period from.
+func (s Subscription) CurrentPeriodEnd() *time.Time {
+	if s.Frequency != FrequencyAnnual || s.PaidAt == nil {
+		return nil
+	}
+	end := s.PaidAt.AddDate(1, 0, 0)
+	return &end
 }
 
 // IsRecurringCharge reports whether this subscription needs the cron
